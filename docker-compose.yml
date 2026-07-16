@@ -1,0 +1,62 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+    environment:
+      - VITE_API_URL=http://backend:8000
+      - VITE_WS_URL=ws://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - deepverify
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB=deepverify
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=deepverify-dev-secret-change-in-production
+      - CORS_ORIGINS=http://localhost:5173
+    depends_on:
+      - mongodb
+      - redis
+    cap_add:
+      - NET_RAW
+    networks:
+      - deepverify
+
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - deepverify
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - deepverify
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  deepverify:
+    driver: bridge

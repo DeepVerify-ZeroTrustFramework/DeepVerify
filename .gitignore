@@ -1,0 +1,15 @@
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local overrides
+docker-compose.override.yml
