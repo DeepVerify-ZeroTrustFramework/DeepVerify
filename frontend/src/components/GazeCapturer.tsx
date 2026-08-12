@@ -124,7 +124,7 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
   // Process video frame (throttled to 100ms)
   const processFrame = useCallback(async () => {
     if (!enabled || !videoRef.current || !canvasRef.current) {
-      animFrameRef.current = requestAnimationFrame(processFrame)
+      animFrameRef.current = requestAnimationFrame(() => processFrame())
       return
     }
 
@@ -165,7 +165,7 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
       }
     }
 
-    animFrameRef.current = requestAnimationFrame(processFrame)
+    animFrameRef.current = requestAnimationFrame(() => processFrame())
   }, [enabled, onGazeData, computeGaze])
 
   // Initialize video from stream

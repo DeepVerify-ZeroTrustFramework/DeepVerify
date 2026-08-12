@@ -1,126 +1,129 @@
 """
-WebRTC Signaling WebSocket endpoint.
+WebRTC Signaling WebSocket — Peer-to-Peer relay server.
 
-Handles SDP offer/answer exchange and ICE candidate relay between
-candidate and interviewer for establishing peer-to-peer video connection.
+Routes:
+    /ws/signaling/{session_id}?role=candidate|interviewer
 
-The server acts as a signaling relay — it does NOT process the media stream.
-Media flows directly between peers (or via TURN relay if needed).
+The server acts purely as a signaling relay. It does NOT touch media.
+Media flows directly between the two browser peers via WebRTC.
+
+Flow:
+    1. Candidate connects → stored in room
+    2. Interviewer connects → stored in room → both get "room-ready"
+    3. Candidate creates SDP offer → relayed to interviewer
+    4. Interviewer creates SDP answer → relayed to candidate
+    5. ICE candidates exchanged via relay
+    6. Media flows peer-to-peer (STUN/TURN)
 """
 import json
 import asyncio
-from typing import Dict, Set
+from typing import Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 router = APIRouter()
 
 # Session signaling rooms: session_id -> {role: websocket}
-_signaling_rooms: Dict[str, Dict[str, WebSocket]] = {}
-# Lock for thread-safe room management
-_room_locks: Dict[str, asyncio.Lock] = {}
-
-
-def _get_lock(session_id: str) -> asyncio.Lock:
-    if session_id not in _room_locks:
-        _room_locks[session_id] = asyncio.Lock()
-    return _room_locks[session_id]
+_rooms: Dict[str, Dict[str, WebSocket]] = {}
 
 
 @router.websocket("/ws/signaling/{session_id}")
 async def websocket_signaling(websocket: WebSocket, session_id: str):
     """
     WebRTC signaling relay for a session.
-
-    Each participant connects with a role query param: ?role=candidate or ?role=interviewer
-    Messages are relayed to the other participant in the same session.
-
-    Message types:
-    - { type: "offer", sdp: "..." }      — SDP offer from caller
-    - { type: "answer", sdp: "..." }     — SDP answer from callee
-    - { type: "ice-candidate", candidate: {...} }  — ICE candidate
-    - { type: "ready" }                   — Participant is ready
+    Query param: ?role=candidate or ?role=interviewer
     """
-    await websocket.accept()
-
-    # Determine role from query params
-    role = websocket.query_params.get("role", "candidate")
+    # Validate role
+    role = websocket.query_params.get("role", "")
     if role not in ("candidate", "interviewer"):
+        await websocket.accept()
         await websocket.send_json({"error": "Invalid role. Use 'candidate' or 'interviewer'."})
         await websocket.close(code=4000)
         return
 
-    lock = _get_lock(session_id)
-
-    async with lock:
-        if session_id not in _signaling_rooms:
-            _signaling_rooms[session_id] = {}
-
-        _signaling_rooms[session_id][role] = websocket
-
-    print(f"[Signaling] {role} joined session {session_id}")
-
-    # Notify the other party that someone joined
+    await websocket.accept()
     other_role = "interviewer" if role == "candidate" else "candidate"
-    await _notify_peer(session_id, other_role, {
+
+    # Register in room
+    if session_id not in _rooms:
+        _rooms[session_id] = {}
+    _rooms[session_id][role] = websocket
+
+    print(f"[Signaling] {role} joined room {session_id}")
+
+    # Notify the other party if they're already connected
+    await _send_to_peer(session_id, other_role, {
         "type": "peer-joined",
         "role": role,
     })
 
-    # If both parties are now connected, notify both
-    room = _signaling_rooms.get(session_id, {})
+    # If both are now in the room, tell both sides
+    room = _rooms.get(session_id, {})
     if "candidate" in room and "interviewer" in room:
+        print(f"[Signaling] Both peers in room {session_id} — sending room-ready")
         for r in ("candidate", "interviewer"):
-            try:
-                await room[r].send_json({
-                    "type": "room-ready",
-                    "participants": list(room.keys()),
-                })
-            except Exception:
-                pass
+            await _send_to_peer(session_id, r, {
+                "type": "room-ready",
+                "participants": ["candidate", "interviewer"],
+            })
 
+    # Main message loop
     try:
         while True:
-            data = await websocket.receive_text()
+            raw = await websocket.receive_text()
             try:
-                msg = json.loads(data)
+                msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
 
             msg_type = msg.get("type", "")
 
-            # Relay signaling messages to the other participant
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
+            # Relay signaling messages to the other peer
             if msg_type in ("offer", "answer", "ice-candidate", "ready", "bye"):
                 msg["from"] = role
-                await _notify_peer(session_id, other_role, msg)
-
-            elif msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+                print(f"[Signaling] Relaying '{msg_type}' from {role} → {other_role} in {session_id}")
+                await _send_to_peer(session_id, other_role, msg)
+            else:
+                print(f"[Signaling] Unknown message type '{msg_type}' from {role}")
 
     except WebSocketDisconnect:
-        print(f"[Signaling] {role} left session {session_id}")
+        print(f"[Signaling] {role} disconnected from room {session_id}")
+    except Exception as e:
+        print(f"[Signaling] Error in {role} handler for {session_id}: {e}")
+    finally:
+        # Safe cleanup — never raise KeyError
+        _cleanup_room(session_id, role)
 
-        async with lock:
-            room = _signaling_rooms.get(session_id, {})
-            if role in room:
-                del room[role]
-            if not room:
-                del _signaling_rooms[session_id]
-                if session_id in _room_locks:
-                    del _room_locks[session_id]
-
-        # Notify other party of disconnect
-        await _notify_peer(session_id, other_role, {
+        # Notify remaining peer
+        await _send_to_peer(session_id, other_role, {
             "type": "peer-left",
             "role": role,
         })
 
 
-async def _notify_peer(session_id: str, target_role: str, message: dict):
-    """Send a message to the other participant in the session."""
-    room = _signaling_rooms.get(session_id, {})
-    peer_ws = room.get(target_role)
-    if peer_ws:
-        try:
-            await peer_ws.send_json(message)
-        except Exception:
-            pass  # Peer may have disconnected
+def _cleanup_room(session_id: str, role: str):
+    """Safely remove a peer from its room. Never raises."""
+    room = _rooms.get(session_id)
+    if room is None:
+        return
+    room.pop(role, None)
+    if not room:
+        _rooms.pop(session_id, None)
+        print(f"[Signaling] Room {session_id} is empty — removed")
+
+
+async def _send_to_peer(session_id: str, target_role: str, message: dict):
+    """Send a JSON message to the specified peer. Silently fails if peer is gone."""
+    room = _rooms.get(session_id)
+    if not room:
+        return
+    ws = room.get(target_role)
+    if not ws:
+        return
+    try:
+        await ws.send_json(message)
+    except Exception:
+        pass

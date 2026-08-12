@@ -1,8 +1,45 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ShieldCheck, LogOut, Loader2, Code2, AlertCircle } from 'lucide-react'
+import { ShieldCheck, Loader2, Code2, AlertCircle, Clock } from 'lucide-react'
+import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { useBehavioralSocket } from '../hooks/useBehavioralSocket'
+
+// ── Language templates ──
+const LANGUAGE_TEMPLATES: Record<string, { lang: string; template: string }> = {
+  'Python': {
+    lang: 'python',
+    template: `# Write your solution here...\n\ndef solution():\n    pass\n`,
+  },
+  'JavaScript': {
+    lang: 'javascript',
+    template: `// Write your solution here...\n\nfunction solution() {\n  \n}\n`,
+  },
+  'TypeScript': {
+    lang: 'typescript',
+    template: `// Write your solution here...\n\nfunction solution(): void {\n  \n}\n`,
+  },
+  'Java': {
+    lang: 'java',
+    template: `// Write your solution here...\n\npublic class Solution {\n    public static void main(String[] args) {\n        \n    }\n}\n`,
+  },
+  'C': {
+    lang: 'c',
+    template: `// Write your solution here...\n\n#include <stdio.h>\n\nint main() {\n    \n    return 0;\n}\n`,
+  },
+  'C++': {
+    lang: 'cpp',
+    template: `// Write your solution here...\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n`,
+  },
+  'Go': {
+    lang: 'go',
+    template: `// Write your solution here...\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello")\n}\n`,
+  },
+  'Rust': {
+    lang: 'rust',
+    template: `// Write your solution here...\n\nfn main() {\n    \n}\n`,
+  },
+}
 
 export default function CandidateSession() {
   const { token } = useParams<{ token: string }>()
@@ -13,6 +50,14 @@ export default function CandidateSession() {
   const [error, setError] = useState('')
   
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  
+  // Editor state
+  const [selectedLang, setSelectedLang] = useState('Python')
+  const [editorCode, setEditorCode] = useState(LANGUAGE_TEMPLATES['Python'].template)
+
+  // Timer
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   
   // Telemetry mocks for UI
   const [gazeDelta, setGazeDelta] = useState(0)
@@ -55,7 +100,26 @@ export default function CandidateSession() {
         localStream.getTracks().forEach(t => t.stop())
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, navigate])
+
+  // Session timer
+  useEffect(() => {
+    if (!session) return
+    timerRef.current = setInterval(() => {
+      setElapsed(prev => prev + 1)
+    }, 1000)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [session])
+
+  const formatTime = (s: number) => {
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    const sec = s % 60
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
+  }
 
   // Initialize WebRTC
   const rtc = useWebRTC(session?.session_id || '', 'candidate', localStream)
@@ -94,6 +158,12 @@ export default function CandidateSession() {
     return () => clearInterval(interval)
   }, [session])
 
+  // Language change handler
+  const handleLanguageChange = (lang: string) => {
+    setSelectedLang(lang)
+    setEditorCode(LANGUAGE_TEMPLATES[lang].template)
+  }
+
   if (loading) {
     return <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>
   }
@@ -108,7 +178,7 @@ export default function CandidateSession() {
 
   return (
     <div className="h-screen bg-[#0A0A0A] flex flex-col overflow-hidden text-white font-sans">
-      {/* Top bar */}
+      {/* Top bar — NO End Session button for candidate */}
       <div className="h-14 bg-[#0F0F0F] border-b border-[#1A1A1A] flex items-center justify-between px-6 shrink-0 z-10">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#1A6B3C]/10 border border-[#1A6B3C]/30 text-[#4CAF50] text-[11px] font-medium">
@@ -117,32 +187,34 @@ export default function CandidateSession() {
           <span className="text-sm font-medium text-gray-300 ml-2">{session.interview_type} Interview</span>
         </div>
         
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-gray-400">00:14:23</span>
-          <button className="flex items-center gap-2 px-4 py-1.5 rounded-md bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors text-[13px] font-medium">
-            <LogOut size={14} /> End Session
-          </button>
+        <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-1.5 text-gray-400">
+            <Clock size={14} />
+            <span className="font-mono">{formatTime(elapsed)}</span>
+          </div>
         </div>
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* Left: Video Area */}
+        {/* Left: Video Area — NO media controls for candidate */}
         <div className="flex-1 relative flex flex-col p-4">
           <div className="flex-1 bg-[#11131A] rounded-xl border border-[#1A1A1A] relative overflow-hidden flex items-center justify-center">
             
             {/* Interviewer Video */}
-            {rtc.state === 'connected' && rtc.remoteStream ? (
+            {rtc.remoteStream ? (
               <video 
                 autoPlay playsInline
-                ref={v => { if (v) v.srcObject = rtc.remoteStream }}
+                ref={v => { if (v && v.srcObject !== rtc.remoteStream) v.srcObject = rtc.remoteStream }}
                 className="w-full h-full object-cover"
               />
             ) : (
               <div className="text-center flex flex-col items-center">
                 <Loader2 size={32} className="animate-spin text-gray-500 mb-4" />
-                <p className="text-gray-400 text-sm">Waiting for interviewer to join...</p>
+                <p className="text-gray-400 text-sm">
+                  {rtc.state === 'error' ? rtc.error : 'Waiting for interviewer to join...'}
+                </p>
               </div>
             )}
 
@@ -164,7 +236,7 @@ export default function CandidateSession() {
           </div>
         </div>
 
-        {/* Right: Code Editor (Dark mode) */}
+        {/* Right: Code Editor with Monaco */}
         <div className="w-[450px] border-l border-[#1A1A1A] bg-[#11131A] flex flex-col">
           {/* Editor Header */}
           <div className="h-12 border-b border-[#1A1A1A] flex items-center justify-between px-4">
@@ -172,32 +244,43 @@ export default function CandidateSession() {
               <Code2 size={16} className="text-blue-400" />
               Shared Editor
             </div>
-            <select className="bg-[#0A0A0A] border border-[#333] rounded px-2 py-1 text-xs text-gray-300 outline-none">
-              <option>Python 3.10</option>
-              <option>TypeScript</option>
-              <option>JavaScript</option>
+            <select 
+              value={selectedLang}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              className="bg-[#0A0A0A] border border-[#333] rounded px-2 py-1 text-xs text-gray-300 outline-none cursor-pointer"
+            >
+              {Object.keys(LANGUAGE_TEMPLATES).map(lang => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
             </select>
           </div>
           
-          {/* Mock Editor Area */}
-          <div className="flex-1 p-4 font-mono text-[13px] text-gray-300 leading-relaxed overflow-y-auto">
-            <div className="text-gray-500 mb-4"># Write your solution here...</div>
-            <div className="text-blue-400">def <span className="text-yellow-200">twoSum</span>(nums, target):</div>
-            <div className="pl-4 text-gray-500">"""</div>
-            <div className="pl-4 text-gray-500">:type nums: List[int]</div>
-            <div className="pl-4 text-gray-500">:type target: int</div>
-            <div className="pl-4 text-gray-500">:rtype: List[int]</div>
-            <div className="pl-4 text-gray-500">"""</div>
-            <div className="pl-4 mt-2">seen = {}</div>
-            <div className="pl-4 text-purple-400">for <span className="text-gray-300">i, num</span> in <span className="text-yellow-200">enumerate</span><span className="text-gray-300">(nums):</span></div>
-            <div className="pl-8">complement = target - num</div>
-            <div className="pl-8 text-purple-400">if <span className="text-gray-300">complement</span> in <span className="text-gray-300">seen:</span></div>
-            <div className="pl-12 text-purple-400">return <span className="text-gray-300">[seen[complement], i]</span></div>
-            <div className="pl-8 mt-2">seen[num] = i</div>
-            <div className="pl-4 mt-2 text-purple-400">return <span className="text-gray-300">[]</span></div>
-            <div className="mt-4 flex">
-              <div className="w-1.5 h-4 bg-gray-500 animate-pulse"></div>
-            </div>
+          {/* Monaco Editor */}
+          <div className="flex-1 overflow-hidden">
+            <Editor
+              height="100%"
+              language={LANGUAGE_TEMPLATES[selectedLang].lang}
+              value={editorCode}
+              onChange={(value) => setEditorCode(value || '')}
+              theme="vs-dark"
+              options={{
+                fontSize: 14,
+                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                lineNumbers: 'on',
+                renderLineHighlight: 'line',
+                tabSize: 4,
+                insertSpaces: true,
+                automaticLayout: true,
+                wordWrap: 'on',
+                padding: { top: 16, bottom: 16 },
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                bracketPairColorization: { enabled: true },
+              }}
+            />
           </div>
 
           {/* Telemetry Strip (Read-only for candidate) */}

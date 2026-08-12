@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
-import { ShieldCheck, Activity, Users, Clock, Loader2, AlertCircle } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { ShieldCheck, Activity, Users, Clock, Loader2, AlertCircle, LogOut } from 'lucide-react'
 import TrustGauge from '../components/TrustGauge'
 import ModuleBreakdown from '../components/ModuleBreakdown'
 import AlertFeed from '../components/AlertFeed'
@@ -10,6 +10,7 @@ import { useWebRTC } from '../hooks/useWebRTC'
 
 export default function InterviewerDash() {
   const { sessionId } = useParams<{ sessionId: string }>()
+  const navigate = useNavigate()
   
   const [session, setSession] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -53,14 +54,14 @@ export default function InterviewerDash() {
   }, [sessionId])
 
   useEffect(() => {
-    // Only connect WebRTC if candidate is in session (wsStatus will indicate this, or we just try connecting)
-    // Actually, in an SFU, we can just connect and wait for the relay track.
+    // Connect to signaling WebSocket and set up P2P connection
     if (session && localStream) {
       rtc.initialize()
     }
     return () => {
       rtc.stop()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, localStream])
 
 
@@ -134,7 +135,7 @@ export default function InterviewerDash() {
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E6F4ED] rounded-full text-[#1A6B3C] text-[11px] font-semibold border border-[#1A6B3C]/20">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full rounded-full bg-[#1A6B3C] opacity-75 animate-ping" />
@@ -144,6 +145,19 @@ export default function InterviewerDash() {
           </div>
           <button className="px-4 py-2 text-[13px] font-semibold text-[#991B1B] hover:bg-[#FEE2E2] rounded-xl transition-colors border border-transparent hover:border-[#FCA5A5]">
             Flag Session
+          </button>
+          <button
+            onClick={() => {
+              if (confirm('Are you sure you want to end this session?')) {
+                // Stop WebRTC and navigate away
+                rtc.stop()
+                navigate('/')
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 text-[13px] font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-xl transition-colors"
+          >
+            <LogOut size={14} />
+            End Session
           </button>
         </div>
       </nav>

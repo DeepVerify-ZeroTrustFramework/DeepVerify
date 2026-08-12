@@ -299,9 +299,10 @@ Alert thresholds:
 │  CANDIDATE SESSION  │          │       INTERVIEWER DASHBOARD          │
 │  (/session/:token)  │          │       (/dashboard/:sessionId)        │
 │                     │          │                                      │
-│  • WebRTC peer conn │◄────────►│  • WebRTC video relay (aiortc SFU)  │
+│  • WebRTC peer conn │◄───P2P───►│  • WebRTC peer conn                 │
 │  • Monaco editor    │          │  • Trust score gauge (live)          │
-│  • MediaPipe gaze   │──WS──►  │  • 4 module breakdown bars          │
+│    (JS/Py/C++/etc)  │          │  • 4 module breakdown bars          │
+│  • MediaPipe gaze   │──WS──►  │  • Remote media controls            │
 │    web worker       │          │  • Alert feed (empty until Axiom     │
 │  • DOM hooks        │──WS──►  │    Engine fires real alerts)         │
 │  • I-frame capture  │──POST─► │  • Flag for review button            │
@@ -400,7 +401,7 @@ Alert thresholds:
 | React 18 + Vite + TypeScript | UI framework |
 | Tailwind CSS | Styling (light mode throughout) |
 | React Router v6 | Routing + route-level access control |
-| @monaco-editor/react | In-session code editor |
+| @monaco-editor/react | In-session code editor (8 languages, custom templates) |
 | @mediapipe/face_mesh | Gaze tracking (runs in web worker, WASM) |
 | WebCodecs API | I-frame detection and capture for PRNU |
 | WebRTC native browser APIs | Peer-to-peer video |
@@ -410,7 +411,7 @@ Alert thresholds:
 | Technology | Purpose |
 |-----------|---------|
 | FastAPI + uvicorn | Async API server (Python 3.11) |
-| aiortc | WebRTC SFU — signaling + video relay |
+| WebSockets (FastAPI) | Pure P2P WebRTC signaling relay |
 | PyWavelets | PRNU Daubechies-8 wavelet decomposition |
 | OpenCV | Frame decoding and processing |
 | scipy + numpy | rPPG signal processing, jitter statistics |
@@ -493,8 +494,8 @@ deepverify/
 │   │       ├── sessions.py            # POST /api/sessions, GET, PATCH
 │   │       ├── enrollment.py          # /enroll/prnu, /enroll/rppg, /enroll/gaze
 │   │       ├── frames.py              # POST /api/frames/:sessionId (live analysis)
-│   │       ├── webrtc.py              # WebRTC offer/answer/ICE endpoints
 │   │       ├── websocket.py           # /ws/candidate/:id, /ws/dashboard/:id
+│   │       ├── signaling.py           # P2P WebRTC relay (/ws/signaling/:sessionId)
 │   │       ├── consent.py             # POST /api/sessions/:id/consent
 │   │       └── export.py              # GET /api/sessions/:id/report (PDF)
 │   │
@@ -658,8 +659,7 @@ SMTP_PASS=your-app-password
 
 | Method | Endpoint | Auth | Description |
 |--------|---------|------|-------------|
-| `POST` | `/api/webrtc/offer/:sessionId/:role` | JWT | Submit WebRTC offer, receive answer |
-| `POST` | `/api/webrtc/ice/:sessionId/:role` | JWT | Submit ICE candidate |
+| `WS` | `/ws/signaling/:sessionId?role=` | URL Query | Real-time P2P WebRTC signaling (offer/answer/ice) |
 
 ### Export
 
@@ -673,6 +673,7 @@ SMTP_PASS=your-app-password
 |-----|------|-----------|-------------|
 | `ws://host/ws/candidate/:sessionId` | Candidate JWT | Client → Server | Gaze events, behavioral events |
 | `ws://host/ws/dashboard/:sessionId` | Interviewer JWT | Server → Client | Trust score updates, alerts |
+| `ws://host/ws/signaling/:sessionId` | URL Query | Bi-directional | P2P WebRTC offer/answer/ice relay |
 
 ---
 
@@ -937,7 +938,7 @@ DeepVerify is the implementation of research published and accepted at the **IEE
 | Akilan C | CB.SC.U4CSE23607 | PRNU module + Axiom Fusion Engine | — |
 | Naren Moorthy S | CB.SC.U4CSE23637 | rPPG module + Frontend portal | [@Naren-bit](https://github.com/Naren-bit) |
 | Regella Krishna Saketh | CB.SC.U4CSE23649 | Jitter module + Interviewer dashboard | — |
-| Vijay Aditya R V | CB.SC.U4CSE23657 | Behavioral module + WebRTC SFU | — |
+| Vijay Aditya R V | CB.SC.U4CSE23657 | Behavioral module + WebRTC P2P | — |
 
 **Guide:** Dr. T Senthilkumar, Professor, Dept. of CSE, Amrita Vishwa Vidyapeetham
 

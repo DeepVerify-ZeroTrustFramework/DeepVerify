@@ -1,121 +1,383 @@
-import { useState, useRef, useCallback } from 'react'
+/**
+ * useWebRTC — Peer-to-peer WebRTC hook via signaling WebSocket.
+ *
+ * Architecture:
+ *   Browser A  ←→  Signaling WS (/ws/signaling/{id})  ←→  Browser B
+ *   Browser A  ←————————— WebRTC media (direct) ——————————→  Browser B
+ *
+ * The candidate is always the "caller" (creates SDP offer).
+ * The interviewer is always the "callee" (creates SDP answer).
+ *
+ * ICE candidates that arrive before setRemoteDescription are queued
+ * and flushed once the remote description is set.
+ */
+import { useState, useRef, useCallback, useEffect } from 'react'
 
-export type WebRTCState = 'idle' | 'waiting' | 'connected' | 'error'
+export type WebRTCState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error'
 
-export function useWebRTC(sessionId: string, role: 'candidate' | 'interviewer', localStream: MediaStream | null) {
+// Build the signaling WS URL relative to current page
+function buildSignalingUrl(sessionId: string, role: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/signaling/${sessionId}?role=${role}`
+}
+
+// ICE servers — Google STUN is free and widely available
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+}
+
+export function useWebRTC(
+  sessionId: string,
+  role: 'candidate' | 'interviewer',
+  localStream: MediaStream | null
+) {
   const [state, setState] = useState<WebRTCState>('idle')
   const [error, setError] = useState('')
-  const pcRef = useRef<RTCPeerConnection | null>(null)
-  const remoteStreamRef = useRef<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
-  
-  // Create PeerConnection and set up signaling
-  const initialize = useCallback(async () => {
-    if (pcRef.current) return
 
-    setState('waiting')
-    
-    // ICE servers could be injected via env in production
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    })
-    pcRef.current = pc
-    remoteStreamRef.current = new MediaStream()
+  // Refs for mutable objects that must survive re-renders
+  const pcRef = useRef<RTCPeerConnection | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
+  const hasRemoteDescription = useRef(false)
+  const isInitialized = useRef(false)
+  const remoteStreamRef = useRef<MediaStream>(new MediaStream())
 
-    // Add local tracks
-    if (localStream && role === 'candidate') {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream)
-      })
-    } else if (role === 'interviewer') {
-      // Interviewer doesn't send video in this setup, just receives
-      // But we need to add a transceiver to receive
-      pc.addTransceiver('video', { direction: 'recvonly' })
-      pc.addTransceiver('audio', { direction: 'recvonly' })
-    }
+  /**
+   * Flush any ICE candidates that were queued before the remote
+   * description was set.
+   */
+  const flushIceCandidates = useCallback(async () => {
+    const pc = pcRef.current
+    if (!pc) return
 
-    // Handle incoming tracks
-    pc.ontrack = (event) => {
-      console.log(`[WebRTC] Received ${event.track.kind} track from ${role === 'candidate' ? 'interviewer' : 'candidate'}`)
-      event.streams[0].getTracks().forEach(track => {
-        remoteStreamRef.current?.addTrack(track)
-      })
-      setRemoteStream(remoteStreamRef.current)
-      setState('connected')
-    }
+    const queue = iceCandidateQueue.current
+    iceCandidateQueue.current = []
 
-    // Handle ICE candidates
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        try {
-          await fetch(`/api/webrtc/ice/${sessionId}/${role}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              candidate: event.candidate.candidate,
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex
-            })
-          })
-        } catch (e) {
-          console.error('[WebRTC] Error sending ICE candidate', e)
-        }
+    for (const candidate of queue) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      } catch (e) {
+        console.warn('[WebRTC] Failed to add queued ICE candidate:', e)
       }
     }
 
-    pc.onconnectionstatechange = () => {
-      console.log(`[WebRTC] Connection state: ${pc.connectionState}`)
-      if (pc.connectionState === 'connected') {
-        setState('connected')
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        setState('error')
-        setError('Connection failed. Please refresh.')
-      }
+    if (queue.length > 0) {
+      console.log(`[WebRTC] Flushed ${queue.length} queued ICE candidates`)
     }
+  }, [])
 
-    // Negotiate (offer/answer)
+  /**
+   * Create the SDP offer (candidate only) and send it via signaling WS.
+   */
+  const createAndSendOffer = useCallback(async () => {
+    const pc = pcRef.current
+    const ws = wsRef.current
+    if (!pc || !ws || ws.readyState !== WebSocket.OPEN) return
+
     try {
+      console.log('[WebRTC] Creating SDP offer...')
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
 
-      const res = await fetch(`/api/webrtc/offer/${sessionId}/${role}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sdp: offer.sdp,
-          type: offer.type
-        })
-      })
-
-      if (!res.ok) throw new Error('Failed to negotiate with signaling server')
-      const answer = await res.json()
-      
-      await pc.setRemoteDescription(new RTCSessionDescription(answer))
-    } catch (e: any) {
-      console.error('[WebRTC] Negotiation failed', e)
+      ws.send(JSON.stringify({
+        type: 'offer',
+        sdp: offer.sdp,
+      }))
+      console.log('[WebRTC] Offer sent to signaling server')
+    } catch (e) {
+      console.error('[WebRTC] Failed to create/send offer:', e)
       setState('error')
-      setError('Failed to connect to signaling server')
+      setError('Failed to create video offer')
     }
-  }, [sessionId, role, localStream])
+  }, [])
 
-  // Stop connection
-  const stop = useCallback(() => {
-    if (pcRef.current) {
-      pcRef.current.close()
-      pcRef.current = null
-      setState('idle')
-      setRemoteStream(null)
-      remoteStreamRef.current = null
-      
-      fetch(`/api/webrtc/close/${sessionId}/${role}`, { method: 'POST' }).catch(() => {})
+  /**
+   * Handle an incoming SDP offer (interviewer only).
+   * Sets remote description then creates and sends the answer.
+   */
+  const handleOffer = useCallback(async (sdp: string) => {
+    const pc = pcRef.current
+    const ws = wsRef.current
+    if (!pc || !ws || ws.readyState !== WebSocket.OPEN) return
+
+    try {
+      console.log('[WebRTC] Received offer — setting remote description...')
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }))
+      hasRemoteDescription.current = true
+
+      // Flush any ICE candidates that arrived before the offer
+      await flushIceCandidates()
+
+      console.log('[WebRTC] Creating SDP answer...')
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+
+      ws.send(JSON.stringify({
+        type: 'answer',
+        sdp: answer.sdp,
+      }))
+      console.log('[WebRTC] Answer sent to signaling server')
+    } catch (e) {
+      console.error('[WebRTC] Failed to handle offer:', e)
+      setState('error')
+      setError('Failed to respond to video offer')
     }
-  }, [sessionId, role])
+  }, [flushIceCandidates])
+
+  /**
+   * Handle an incoming SDP answer (candidate only).
+   */
+  const handleAnswer = useCallback(async (sdp: string) => {
+    const pc = pcRef.current
+    if (!pc) return
+
+    try {
+      console.log('[WebRTC] Received answer — setting remote description...')
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
+      hasRemoteDescription.current = true
+
+      // Flush any ICE candidates that arrived before the answer
+      await flushIceCandidates()
+    } catch (e) {
+      console.error('[WebRTC] Failed to handle answer:', e)
+    }
+  }, [flushIceCandidates])
+
+  /**
+   * Handle an incoming ICE candidate from the remote peer.
+   */
+  const handleIceCandidate = useCallback(async (candidateInit: RTCIceCandidateInit) => {
+    const pc = pcRef.current
+    if (!pc) return
+
+    if (hasRemoteDescription.current) {
+      // Remote description already set — add immediately
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidateInit))
+      } catch (e) {
+        console.warn('[WebRTC] Failed to add ICE candidate:', e)
+      }
+    } else {
+      // Queue for later
+      iceCandidateQueue.current.push(candidateInit)
+    }
+  }, [])
+
+  /**
+   * Main initialization: create PeerConnection + Signaling WebSocket.
+   */
+  const initialize = useCallback(() => {
+    if (isInitialized.current) return
+    if (!sessionId) return
+    isInitialized.current = true
+
+    setState('waiting')
+    setError('')
+    hasRemoteDescription.current = false
+    iceCandidateQueue.current = []
+    remoteStreamRef.current = new MediaStream()
+
+    // ─── 1. Create RTCPeerConnection ───
+    console.log(`[WebRTC] Initializing as ${role} for session ${sessionId}`)
+    const pc = new RTCPeerConnection(ICE_CONFIG)
+    pcRef.current = pc
+
+    // Add local media tracks (both sides send video + audio)
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream)
+        console.log(`[WebRTC] Added local ${track.kind} track`)
+      })
+    }
+
+    // Handle incoming remote tracks
+    pc.ontrack = (event) => {
+      console.log(`[WebRTC] Received remote ${event.track.kind} track`)
+
+      // Add to our accumulating remote stream
+      remoteStreamRef.current.addTrack(event.track)
+
+      // Create a fresh MediaStream reference so React detects the change
+      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
+      setState('connected')
+    }
+
+    // Connection state monitoring
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState
+      console.log(`[WebRTC] PeerConnection state: ${s}`)
+      if (s === 'connected') {
+        setState('connected')
+      } else if (s === 'failed') {
+        setState('error')
+        setError('WebRTC connection failed. Please refresh.')
+      } else if (s === 'disconnected') {
+        // May recover — don't immediately error
+        console.warn('[WebRTC] Connection disconnected — may recover...')
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE connection state: ${pc.iceConnectionState}`)
+    }
+
+    // ─── 2. Connect Signaling WebSocket ───
+    const wsUrl = buildSignalingUrl(sessionId, role)
+    console.log(`[WebRTC] Connecting to signaling: ${wsUrl}`)
+    const ws = new WebSocket(wsUrl)
+    wsRef.current = ws
+
+    // Send local ICE candidates to remote peer via signaling
+    pc.onicecandidate = (event) => {
+      if (event.candidate && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'ice-candidate',
+          candidate: {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          },
+        }))
+      }
+    }
+
+    ws.onopen = () => {
+      console.log(`[WebRTC] Signaling WebSocket connected as ${role}`)
+      // Tell the server we're ready
+      ws.send(JSON.stringify({ type: 'ready' }))
+    }
+
+    ws.onmessage = (event) => {
+      let msg: any
+      try {
+        msg = JSON.parse(event.data)
+      } catch {
+        return
+      }
+
+      switch (msg.type) {
+        case 'room-ready':
+          // Both peers present — candidate creates the offer
+          console.log('[WebRTC] Room ready — both peers connected')
+          if (role === 'candidate') {
+            createAndSendOffer()
+          }
+          break
+
+        case 'peer-joined':
+          console.log(`[WebRTC] Peer joined: ${msg.role}`)
+          // If we're the candidate and the interviewer just joined,
+          // but we haven't created an offer yet, do it now.
+          // This handles the case where the candidate loaded first.
+          if (role === 'candidate' && msg.role === 'interviewer' && !hasRemoteDescription.current) {
+            createAndSendOffer()
+          }
+          break
+
+        case 'offer':
+          // Only the interviewer should receive offers
+          if (role === 'interviewer') {
+            handleOffer(msg.sdp)
+          }
+          break
+
+        case 'answer':
+          // Only the candidate should receive answers
+          if (role === 'candidate') {
+            handleAnswer(msg.sdp)
+          }
+          break
+
+        case 'ice-candidate':
+          if (msg.candidate) {
+            handleIceCandidate(msg.candidate)
+          }
+          break
+
+        case 'peer-left':
+          console.log(`[WebRTC] Peer left: ${msg.role}`)
+          setState('waiting')
+          setRemoteStream(null)
+          remoteStreamRef.current = new MediaStream()
+          hasRemoteDescription.current = false
+          break
+
+        case 'pong':
+          // Heartbeat response — ignore
+          break
+
+        default:
+          console.log(`[WebRTC] Unknown signaling message: ${msg.type}`)
+      }
+    }
+
+    ws.onerror = (e) => {
+      console.error('[WebRTC] Signaling WebSocket error:', e)
+    }
+
+    ws.onclose = (e) => {
+      console.log(`[WebRTC] Signaling WebSocket closed (code=${e.code})`)
+    }
+
+    // Heartbeat to keep the WebSocket alive through proxies
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }))
+      }
+    }, 25000)
+
+    // Store cleanup ref for the ping interval
+    ;(pc as any).__pingInterval = pingInterval
+
+  }, [sessionId, role, localStream, createAndSendOffer, handleOffer, handleAnswer, handleIceCandidate])
+
+  /**
+   * Clean teardown of everything.
+   */
+  const stop = useCallback(() => {
+    // Clear ping interval
+    const pc = pcRef.current
+    if (pc && (pc as any).__pingInterval) {
+      clearInterval((pc as any).__pingInterval)
+    }
+
+    // Close WebSocket
+    const ws = wsRef.current
+    if (ws) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'bye' }))
+        } catch { /* ignore */ }
+      }
+      ws.close()
+      wsRef.current = null
+    }
+
+    // Close PeerConnection
+    if (pc) {
+      pc.close()
+      pcRef.current = null
+    }
+
+    // Reset state
+    setState('idle')
+    setError('')
+    setRemoteStream(null)
+    remoteStreamRef.current = new MediaStream()
+    hasRemoteDescription.current = false
+    iceCandidateQueue.current = []
+    isInitialized.current = false
+  }, [])
 
   return {
     state,
     error,
     remoteStream,
     initialize,
-    stop
+    stop,
   }
 }
