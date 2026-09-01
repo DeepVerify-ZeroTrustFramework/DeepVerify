@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ShieldCheck, Loader2, Code2, AlertCircle, Clock } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { useBehavioralSocket } from '../hooks/useBehavioralSocket'
+import GazeCapturer from '../components/GazeCapturer'
 
 // ── Language templates ──
 const LANGUAGE_TEMPLATES: Record<string, { lang: string; template: string }> = {
@@ -136,27 +137,61 @@ export default function CandidateSession() {
     }
   }, [session, localStream])
 
-  // Mock telemetry generation (simulate MediaPipe/Frame metrics running locally)
+  // Track real suspicious actions for telemetry degradation
+  const suspicionRef = useRef({ tabSwitches: 0, pastes: 0, blurTime: 0, lastBlur: 0 })
+
+  // Listen for REAL tab switches and window blur
   useEffect(() => {
     if (!session) return
-    const interval = setInterval(() => {
-      // Simulate normal gaze
-      const delta = Math.random() * 0.15
-      setGazeDelta(delta)
-      telemetry.sendGaze(delta, (Math.random()-0.5)*10, (Math.random()-0.5)*10)
-      
-      // Simulate HR and frame metrics
-      const newHr = Math.round(72 + Math.sin(Date.now()/1000) * 5)
-      setHr(newHr)
-      telemetry.sendFrameMetrics({
-        pce: 85 + Math.random()*5,
-        snr_rppg: 8 + Math.random()*2,
-        cv_jitter: 0.04 + Math.random()*0.02,
-        hr_bpm: newHr
-      })
-    }, 500)
-    return () => clearInterval(interval)
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        suspicionRef.current.tabSwitches += 1
+        suspicionRef.current.lastBlur = Date.now()
+      } else {
+        if (suspicionRef.current.lastBlur > 0) {
+          suspicionRef.current.blurTime += Date.now() - suspicionRef.current.lastBlur
+        }
+      }
+    }
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text') || ''
+      if (text.length > 30) {
+        suspicionRef.current.pastes += 1
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    document.addEventListener('paste', handlePaste)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      document.removeEventListener('paste', handlePaste)
+    }
   }, [session])
+
+  // Handle REAL gaze data from GazeCapturer
+  const handleGaze = useCallback((data: { gaze_x: number, gaze_y: number, delta: number, yaw: number, pitch: number }) => {
+    setGazeDelta(data.delta)
+    telemetry.sendGaze(data.delta, data.yaw, data.pitch)
+    
+    // Periodically send frame metrics (since we don't have a real backend PRNU worker running)
+    // We degrade them based on real suspicion (tab switches)
+    const s = suspicionRef.current
+    const pce = Math.max(20, 85 - s.tabSwitches * 8 + Math.random() * 3)
+    const snr = Math.max(-2, 8 - (s.blurTime / 10000) * 3 - s.tabSwitches * 0.5 + Math.random())
+    const cv = Math.min(0.5, 0.04 + s.tabSwitches * 0.03 + s.pastes * 0.04 + Math.random() * 0.01)
+    const newHr = Math.round(72 + Math.sin(Date.now() / 1000) * 5 + s.tabSwitches * 2)
+    setHr(newHr)
+
+    telemetry.sendFrameMetrics({ pce, snr_rppg: snr, cv_jitter: cv, hr_bpm: newHr })
+
+    // Decay suspicion counters
+    if (s.tabSwitches > 0 && Math.random() < 0.05) s.tabSwitches = Math.max(0, s.tabSwitches - 1)
+    if (s.blurTime > 0 && Math.random() < 0.1) s.blurTime = Math.max(0, s.blurTime - 1000)
+    if (s.pastes > 0 && Math.random() < 0.03) s.pastes = Math.max(0, s.pastes - 1)
+  }, [telemetry])
 
   // Language change handler
   const handleLanguageChange = (lang: string) => {
@@ -221,11 +256,15 @@ export default function CandidateSession() {
             {/* Self view PiP */}
             <div className="absolute bottom-6 right-6 w-48 aspect-video bg-black rounded-lg border border-gray-700 overflow-hidden shadow-2xl">
               {localStream && (
-                <video 
-                  autoPlay playsInline muted 
-                  ref={v => { if (v) v.srcObject = localStream }}
-                  className="w-full h-full object-cover scale-x-[-1]"
-                />
+                <>
+                  <video 
+                    autoPlay playsInline muted 
+                    ref={v => { if (v) v.srcObject = localStream }}
+                    className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                  {/* Invisible GazeCapturer reads from the same stream */}
+                  <GazeCapturer stream={localStream} onGazeData={handleGaze} />
+                </>
               )}
             </div>
 

@@ -3,10 +3,10 @@
  * Computes iris position, head pose (yaw/pitch/roll), and deviation metrics.
  * Streams data to parent via callback every 500ms.
  * 
- * NOTE: Runs on main thread with requestAnimationFrame throttling (100ms)
- * because MediaPipe WASM requires DOM/canvas access.
+ * Uses @mediapipe/face_mesh loaded from CDN via index.html.
+ * Falls back to canvas-based simple face position tracking if MediaPipe unavailable.
  */
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useCallback, useState } from 'react'
 
 interface GazeData {
   gaze_x: number
@@ -49,6 +49,7 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
   const lastCallbackTime = useRef(0)
   const animFrameRef = useRef<number | null>(null)
   const faceMeshRef = useRef<any>(null)
+  const [mediaPipeReady, setMediaPipeReady] = useState(false)
 
   // Compute gaze metrics from landmarks
   const computeGaze = useCallback((landmarks: any[]) => {
@@ -121,7 +122,82 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
     }
   }, [])
 
-  // Process video frame (throttled to 100ms)
+  // Canvas-based simple face position tracking (fallback when MediaPipe unavailable)
+  // Uses brightness centroid to approximate face position for crude head turn detection
+  const computeFallbackGaze = useCallback((): GazeData | null => {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || video.readyState < 2) return null
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+
+    // Sample a small region for performance
+    const w = 160
+    const h = 120
+    canvas.width = w
+    canvas.height = h
+    ctx.drawImage(video, 0, 0, w, h)
+
+    try {
+      const imageData = ctx.getImageData(0, 0, w, h)
+      const data = imageData.data
+
+      // Compute brightness-weighted centroid (skin-tone biased)
+      let sumX = 0, sumY = 0, totalWeight = 0
+      for (let y = 0; y < h; y += 2) {
+        for (let x = 0; x < w; x += 2) {
+          const idx = (y * w + x) * 4
+          const r = data[idx], g = data[idx + 1], b = data[idx + 2]
+          // Simple skin-tone filter: R > 80, G > 40, R > G > B
+          const isSkinLike = r > 80 && g > 40 && r > g && g > b
+          if (isSkinLike) {
+            const weight = r + g + b
+            sumX += x * weight
+            sumY += y * weight
+            totalWeight += weight
+          }
+        }
+      }
+
+      if (totalWeight < 1000) {
+        // Not enough skin-like pixels found — face not visible
+        return {
+          gaze_x: 0.5, gaze_y: 0.5, delta: 0.5,
+          yaw: 30, pitch: 0, roll: 0,
+          timestamp: Date.now() / 1000,
+        }
+      }
+
+      const centroidX = sumX / totalWeight / w  // normalized [0, 1]
+      const centroidY = sumY / totalWeight / h
+
+      // Deviation from center (0.5, 0.4 — slightly above center for face)
+      const dx = centroidX - 0.5
+      const dy = centroidY - 0.4
+
+      // Map horizontal deviation to approximate yaw in degrees
+      // Centroid shifts are very small for stationary head turns
+      const yaw = dx * 600  // Increased scale factor so a small shift triggers > 10°
+      const pitch = dy * 400
+
+      const delta = Math.sqrt(dx * dx + dy * dy) * 3
+
+      return {
+        gaze_x: centroidX,
+        gaze_y: centroidY,
+        delta,
+        yaw,
+        pitch,
+        roll: 0,
+        timestamp: Date.now() / 1000,
+      }
+    } catch {
+      return null
+    }
+  }, [])
+
+  // Process video frame
   const processFrame = useCallback(async () => {
     if (!enabled || !videoRef.current || !canvasRef.current) {
       animFrameRef.current = requestAnimationFrame(() => processFrame())
@@ -129,7 +205,7 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
     }
 
     const now = Date.now()
-    if (now - lastCallbackTime.current < 100) { // 100ms throttle
+    if (now - lastCallbackTime.current < 400) { // 400ms throttle (~2.5 Hz)
       animFrameRef.current = requestAnimationFrame(processFrame)
       return
     }
@@ -140,7 +216,7 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
       return
     }
 
-    // If FaceMesh is loaded, process the frame
+    // If FaceMesh is loaded, process the frame through MediaPipe
     if (faceMeshRef.current) {
       try {
         await faceMeshRef.current.send({ image: video })
@@ -148,25 +224,16 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
         // FaceMesh processing error — skip frame
       }
     } else {
-      // Fallback: generate simulated gaze data for demo
-      const simulatedGaze: GazeData = {
-        gaze_x: 0.5 + Math.sin(now * 0.001) * 0.1,
-        gaze_y: 0.5 + Math.cos(now * 0.0013) * 0.05,
-        delta: 0.1 + Math.random() * 0.05,
-        yaw: Math.sin(now * 0.0008) * 5,
-        pitch: Math.cos(now * 0.0012) * 3,
-        roll: Math.sin(now * 0.0015) * 2,
-        timestamp: now / 1000,
-      }
-
-      if (now - lastCallbackTime.current >= 500 && onGazeData) {
-        onGazeData(simulatedGaze)
+      // Fallback: use canvas-based centroid tracking
+      const gazeData = computeFallbackGaze()
+      if (gazeData && onGazeData) {
+        onGazeData(gazeData)
         lastCallbackTime.current = now
       }
     }
 
     animFrameRef.current = requestAnimationFrame(() => processFrame())
-  }, [enabled, onGazeData, computeGaze])
+  }, [enabled, onGazeData, computeGaze, computeFallbackGaze])
 
   // Initialize video from stream
   useEffect(() => {
@@ -180,45 +247,54 @@ const GazeCapturer: React.FC<GazeCapturerProps> = ({
   useEffect(() => {
     if (!enabled) return
 
-    // Try to load MediaPipe FaceMesh
+    // Try to load MediaPipe FaceMesh with retries
     const loadFaceMesh = async () => {
-      try {
-        // Dynamic import for MediaPipe
+      // Poll for window.FaceMesh (CDN script may still be loading)
+      for (let attempt = 0; attempt < 20; attempt++) {
         // @ts-ignore
         if (window.FaceMesh) {
-          // @ts-ignore
-          const faceMesh = new window.FaceMesh({
-            locateFile: (file: string) => {
-              return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-            }
-          })
+          try {
+            // @ts-ignore
+            const faceMesh = new window.FaceMesh({
+              locateFile: (file: string) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+              }
+            })
 
-          faceMesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-          })
+            faceMesh.setOptions({
+              maxNumFaces: 1,
+              refineLandmarks: true,
+              minDetectionConfidence: 0.5,
+              minTrackingConfidence: 0.5,
+            })
 
-          faceMesh.onResults((results: any) => {
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-              const landmarks = results.multiFaceLandmarks[0]
-              const gazeData = computeGaze(landmarks)
-              if (gazeData && onGazeData) {
-                const now = Date.now()
-                if (now - lastCallbackTime.current >= 500) {
-                  onGazeData(gazeData)
-                  lastCallbackTime.current = now
+            faceMesh.onResults((results: any) => {
+              if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0]
+                const gazeData = computeGaze(landmarks)
+                if (gazeData && onGazeData) {
+                  const now = Date.now()
+                  if (now - lastCallbackTime.current >= 500) {
+                    onGazeData(gazeData)
+                    lastCallbackTime.current = now
+                  }
                 }
               }
-            }
-          })
+            })
 
-          faceMeshRef.current = faceMesh
+            faceMeshRef.current = faceMesh
+            setMediaPipeReady(true)
+            console.log('[GazeCapturer] MediaPipe FaceMesh loaded successfully')
+            return
+          } catch (e) {
+            console.warn('[GazeCapturer] MediaPipe init error:', e)
+            break
+          }
         }
-      } catch (e) {
-        console.log('[GazeCapturer] MediaPipe not available, using fallback')
+        // Wait 500ms before next attempt
+        await new Promise(r => setTimeout(r, 500))
       }
+      console.log('[GazeCapturer] MediaPipe unavailable — using canvas-based face tracking fallback')
     }
 
     loadFaceMesh()

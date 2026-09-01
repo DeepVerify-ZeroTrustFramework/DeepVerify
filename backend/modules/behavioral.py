@@ -151,7 +151,7 @@ class BehavioralTracker:
     def _compute_pose_score(self) -> float:
         """
         Head pose score (0=bad, 1=good).
-        >30° yaw = suspicious (looking away from screen).
+        >10° yaw = suspicious (looking away from screen).
         """
         if len(self.yaw_readings) < 10:
             return 1.0  # Not enough data — assume good
@@ -159,7 +159,7 @@ class BehavioralTracker:
         # Use last 60 samples
         recent_yaw = self.yaw_readings[-60:]
         extreme_pose = np.mean([
-            1.0 if abs(y) > 30.0 else 0.0
+            1.0 if abs(y) > 10.0 else 0.0
             for y in recent_yaw
         ])
         return float(1.0 - extreme_pose)
@@ -182,14 +182,16 @@ def compute_behavioral_score(session_telemetry: Dict, session_baseline: Dict) ->
         w3*(1 - normalize(Cpaste)) + w4*(1 - normalize(head_rotation))
 
     Args:
-        session_telemetry: Dict with gaze_deltas, tab_switches_last_5min,
-                          large_pastes_last_5min, yaw_readings
-        session_baseline: Dict with gazeRangeX (= λ threshold)
+        session_telemetry: Dict with gaze_deltas, tab_switches_5min,
+                          large_pastes_5min, yaw_readings
+        session_baseline: Dict with lambda_gaze (= λ threshold)
 
     Returns:
         Behavioral score B ∈ [0, 1]
     """
-    lambda_gaze = session_baseline.get('gazeRangeX', 0.3)
+    # Accept both key names for threshold
+    lambda_gaze = session_baseline.get('lambda_gaze',
+                  session_baseline.get('gazeRangeX', 0.15))
 
     # Gaze deviation score
     gaze_deltas = session_telemetry.get('gaze_deltas', [])
@@ -200,19 +202,22 @@ def compute_behavioral_score(session_telemetry: Dict, session_baseline: Dict) ->
     else:
         gaze_score = 1.0
 
-    # Tab switch score
-    switch_rate = session_telemetry.get('tab_switches_last_5min', 0) / 5.0
+    # Tab switch score — accept both key names
+    tab_switches = (session_telemetry.get('tab_switches_5min', 0) or
+                    session_telemetry.get('tab_switches_last_5min', 0))
+    switch_rate = tab_switches / 5.0
     switch_score = max(0, 1.0 - switch_rate / 3.0)
 
-    # Clipboard score
-    large_pastes = session_telemetry.get('large_pastes_last_5min', 0)
+    # Clipboard score — accept both key names
+    large_pastes = (session_telemetry.get('large_pastes_5min', 0) or
+                    session_telemetry.get('large_pastes_last_5min', 0))
     paste_score = max(0, 1.0 - large_pastes / 2.0)
 
     # Head pose score
     yaw_readings = session_telemetry.get('yaw_readings', [])
     if yaw_readings:
         recent_yaw = yaw_readings[-60:]
-        extreme_pose = np.mean([abs(y) > 30 for y in recent_yaw])
+        extreme_pose = np.mean([abs(y) > 10 for y in recent_yaw])
         pose_score = 1.0 - extreme_pose
     else:
         pose_score = 1.0
