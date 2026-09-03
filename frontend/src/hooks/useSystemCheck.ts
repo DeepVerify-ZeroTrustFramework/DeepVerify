@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export interface CheckStep {
   id: number
@@ -31,6 +31,27 @@ export function useSystemCheck(sessionId: string) {
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoError, setPhotoError] = useState<string | null>(null)
   const [isPhotoValidated, setIsPhotoValidated] = useState(false)
+
+  // Auto-detect pre-enrolled profile photo from candidate's account
+  useEffect(() => {
+    async function checkExistingProfilePhoto() {
+      try {
+        const res = await fetch(`/api/face-verification/status/${sessionId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.reference_image_url) {
+            setReferencePhotoUrl(data.reference_image_url)
+            setIsPhotoValidated(true)
+          }
+        }
+      } catch (err) {
+        // Silently continue
+      }
+    }
+    if (sessionId) {
+      checkExistingProfilePhoto()
+    }
+  }, [sessionId])
 
   // Step 1: Permissions
   const requestPermissions = async () => {

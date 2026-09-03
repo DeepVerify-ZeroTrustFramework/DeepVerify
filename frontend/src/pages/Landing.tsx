@@ -105,23 +105,41 @@ export default function Landing() {
               DeepVerify verifies the physics of a video call — camera sensor noise, biological pulse, and network timing. No deepfake, proxy, or AI assistant gets through.
             </p>
 
-            <div className="flex items-center gap-3 mb-8">
+            {/* Dual Portal Gateways */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
               <Link
-                to="/create"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#A4123F] text-white text-sm font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors"
+                to="/auth/candidate/login"
+                className="p-4 rounded-xl border border-[#E4E4E6] bg-white hover:border-[#A4123F] hover:shadow-md transition-all group"
               >
-                Create a session <ArrowRight size={16} />
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-[#0F0F0F] group-hover:text-[#A4123F] transition-colors flex items-center gap-1.5">
+                    Candidate Portal
+                  </span>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:translate-x-0.5 group-hover:text-[#A4123F] transition-all" />
+                </div>
+                <p className="text-[11px] text-[#6B6B6B] leading-normal">
+                  Upload ID photo, view recruiter invitations & complete zero-trust checks.
+                </p>
               </Link>
-              <a
-                href="#how-it-works"
-                className="px-6 py-3 text-sm font-medium text-[#3A3A3A] border border-[#E4E4E6] rounded-xl hover:border-[#D0D0D3] transition-colors"
+
+              <Link
+                to="/auth/recruiter/login"
+                className="p-4 rounded-xl border border-[#0F0F0F] bg-[#0F0F0F] text-white hover:bg-[#222] hover:shadow-md transition-all group"
               >
-                See how it works
-              </a>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    Company Portal
+                  </span>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:translate-x-0.5 group-hover:text-white transition-all" />
+                </div>
+                <p className="text-[11px] text-gray-400 leading-normal">
+                  Search verified candidate profiles, issue direct invites & watch live telemetry.
+                </p>
+              </Link>
             </div>
 
             <p className="text-[12px] text-[#9B9B9B]">
-              12 sessions verified today · avg trust score 91%
+              Passive Forensics: PRNU Wavelet Denoising · POS rPPG Pulse · Scapy Jitter Profiling
             </p>
           </div>
 

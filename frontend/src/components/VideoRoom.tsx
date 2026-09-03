@@ -6,7 +6,7 @@ export default function VideoRoom({
   state, 
   remoteStream, 
   localStream,
-  status
+  status: _status
 }: { 
   state: WebRTCState
   remoteStream: MediaStream | null

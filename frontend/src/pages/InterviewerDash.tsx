@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ShieldCheck, Activity, Users, Clock, Loader2, AlertCircle, LogOut, CheckCircle2, XCircle, Camera, ExternalLink, Image as ImageIcon } from 'lucide-react'
+import { ShieldCheck, Activity, Clock, Loader2, AlertCircle, LogOut, CheckCircle2, XCircle, Camera, Image as ImageIcon, FileText, Home } from 'lucide-react'
 import TrustGauge from '../components/TrustGauge'
 import ModuleBreakdown from '../components/ModuleBreakdown'
 import AlertFeed from '../components/AlertFeed'
@@ -17,6 +17,34 @@ export default function InterviewerDash() {
   const [error, setError] = useState('')
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [showFaceModal, setShowFaceModal] = useState(false)
+
+  // Exit interview state
+  const [showEndModal, setShowEndModal] = useState(false)
+  const [isEnded, setIsEnded] = useState(false)
+  const [endingSession, setEndingSession] = useState(false)
+
+  const handleEndSession = async () => {
+    setEndingSession(true)
+    try {
+      if (sessionId) {
+        await fetch(`/api/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'COMPLETED' }),
+        })
+      }
+    } catch (e) {
+      console.warn('Failed to update session status', e)
+    } finally {
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop())
+      }
+      rtc.stop()
+      setEndingSession(false)
+      setShowEndModal(false)
+      setIsEnded(true)
+    }
+  }
 
   // Initialize WebSockets for dashboard data
   const { score, breakdown, raw, alerts, status: wsStatus, acknowledgeAlert } = useTrustScore(sessionId || '')
@@ -76,6 +104,62 @@ export default function InterviewerDash() {
       <h1 className="text-xl font-bold text-[#0F0F0F] mb-2">Error</h1>
       <p className="text-[#6B6B6B]">{error}</p>
     </div>
+  }
+
+  if (isEnded) {
+    return (
+      <div className="min-h-screen bg-[#F7F7F8] flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-full max-w-xl bg-white border border-[#E4E4E6] rounded-3xl p-10 shadow-lg flex flex-col items-center">
+          <div className="w-20 h-20 rounded-full bg-[#FDF2F4] border-2 border-[#A4123F] flex items-center justify-center text-[#A4123F] mb-6 shadow-md shadow-[#A4123F]/10">
+            <ShieldCheck size={42} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#0F0F0F] mb-2">Interview Session Concluded</h1>
+          <p className="text-sm text-[#555] mb-6 max-w-md leading-relaxed">
+            Session <strong className="text-[#0F0F0F] font-mono">{session.session_id}</strong> with candidate <strong className="text-[#0F0F0F]">{session.candidate_name}</strong> has been ended and marked as complete.
+          </p>
+
+          <div className="w-full bg-[#FAFAFB] border border-[#E5E5E8] rounded-2xl p-5 mb-8 text-left space-y-3.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Candidate:</span>
+              <span className="font-bold text-[#0F0F0F]">{session.candidate_name} ({session.role})</span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Overall Trust Score:</span>
+              <span className={`font-mono font-bold text-sm ${score >= 80 ? 'text-[#1A6B3C]' : score >= 60 ? 'text-amber-600' : 'text-[#991B1B]'}`}>
+                {score} / 100
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">AWS Face Verification:</span>
+              <span className="inline-flex items-center gap-1 font-bold text-[#1A6B3C]">
+                {session.face_verification?.verified ? `✓ Match (${session.face_verification.similarity}%)` : 'Processed'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Recorded Alerts:</span>
+              <span className="font-semibold text-[#0F0F0F]">{alerts.length} Flagged Events</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <a
+              href={`/api/reports/${session.session_id}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 py-3 px-5 rounded-xl bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2"
+            >
+              <FileText size={15} /> Download PDF Report
+            </a>
+            <button
+              onClick={() => navigate('/recruiter/dashboard')}
+              className="py-3 px-5 rounded-xl border border-[#D5D5D7] hover:bg-gray-50 text-xs font-semibold text-[#3A3A3A] transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <Home size={15} /> Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // Waiting Room state (BUG 3 & 4 FIX)
@@ -148,14 +232,8 @@ export default function InterviewerDash() {
             Flag Session
           </button>
           <button
-            onClick={() => {
-              if (confirm('Are you sure you want to end this session?')) {
-                // Stop WebRTC and navigate away
-                rtc.stop()
-                navigate('/')
-              }
-            }}
-            className="flex items-center gap-2 px-4 py-2 text-[13px] font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-xl transition-colors"
+            onClick={() => setShowEndModal(true)}
+            className="flex items-center gap-2 px-4 py-2 text-[13px] font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-xl transition-colors cursor-pointer"
           >
             <LogOut size={14} />
             End Session
@@ -383,6 +461,57 @@ export default function InterviewerDash() {
           </div>
         </div>
       )}
+
+      {/* End Session Confirmation Modal */}
+      {showEndModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white border border-[#E4E4E6] rounded-2xl p-6 shadow-2xl animate-fade-in text-[#0F0F0F]">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-50 border border-red-200 text-[#991B1B] flex items-center justify-center">
+                <LogOut size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Conclude Interview Session?</h3>
+                <p className="text-xs text-[#6B6B6B]">Session {sessionId}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#555] mb-6 leading-relaxed">
+              Are you sure you want to end this interview? The candidate will be disconnected, and the final forensic trust score and biometric logs will be finalized.
+            </p>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowEndModal(false)}
+                disabled={endingSession}
+                className="px-4 py-2 rounded-xl border border-[#D5D5D7] hover:bg-gray-50 text-xs font-semibold text-[#3A3A3A] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleEndSession}
+                disabled={endingSession}
+                className="px-5 py-2 rounded-xl bg-[#991B1B] hover:bg-[#7F1D1D] text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-md"
+              >
+                {endingSession ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Finalizing...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogOut size={14} />
+                    <span>Yes, End Session</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

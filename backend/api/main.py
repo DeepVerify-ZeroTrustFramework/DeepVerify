@@ -12,7 +12,10 @@ from db.mongo import connect_mongodb, close_mongodb
 from db.redis_client import connect_redis, close_redis
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
-from api.routes import session, enrollment, frames, dashboard, signaling, report, ws_handlers, webrtc, tts, face_verification
+from api.routes import (
+    session, enrollment, frames, dashboard, signaling, report,
+    ws_handlers, webrtc, tts, face_verification, auth, candidates, invitations
+)
 
 
 @asynccontextmanager
@@ -45,6 +48,9 @@ app.add_middleware(
 )
 
 # Mount routers
+app.include_router(auth.router, prefix="/api", tags=["Authentication"])
+app.include_router(candidates.router, prefix="/api", tags=["Candidates Directory"])
+app.include_router(invitations.router, prefix="/api", tags=["Invitations & Messaging"])
 app.include_router(session.router, prefix="/api", tags=["Sessions"])
 app.include_router(enrollment.router, prefix="/api", tags=["Enrollment"])
 app.include_router(frames.router, tags=["Frames & Analysis"])

@@ -65,7 +65,7 @@ export default function AlertFeed({
           >
             <div className="flex items-start gap-3">
               <div className="mt-0.5">
-                {getIcon(alert.severity, styles.split('icon-')[1])}
+                {getIcon(alert.alertType, alert.severity, styles.split('icon-')[1] || '')}
               </div>
               <div className="flex-1">
                 <div className="flex justify-between items-start mb-1">

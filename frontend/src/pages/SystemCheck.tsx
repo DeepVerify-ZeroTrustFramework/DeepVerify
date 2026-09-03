@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ShieldCheck, Loader2, Camera, AlertCircle, Wifi, Cpu, 
   HeartPulse, Eye, FileText, CheckCircle2, Volume2, VolumeX, Monitor,
-  UploadCloud, UserCheck, Image as ImageIcon
+  UploadCloud, UserCheck
 } from 'lucide-react'
 import { useSystemCheck } from '../hooks/useSystemCheck'
 import { useTTS } from '../hooks/useTTS'
@@ -444,7 +444,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                 />
 
                 {/* Upload or Preview Box */}
-                {!localPhotoPreview ? (
+                {!localPhotoPreview && !referencePhotoUrl ? (
                   <div 
                     onClick={() => fileInputRef.current?.click()}
                     className="border-2 border-dashed border-[#D0D0D5] hover:border-[#A4123F] rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAFAFB] hover:bg-[#FDF2F5] mb-5 group"
@@ -458,12 +458,16 @@ function SystemCheckWizard({ session }: { session: any }) {
                 ) : (
                   <div className="flex items-center gap-4 p-4 rounded-2xl border border-[#E4E4E6] bg-[#FAFAFB] mb-5">
                     <img 
-                      src={localPhotoPreview} 
+                      src={localPhotoPreview || referencePhotoUrl || ''} 
                       alt="Candidate Reference" 
                       className="w-20 h-24 object-cover rounded-xl border border-white shadow-sm"
                     />
                     <div className="flex-1">
-                      <p className="text-[13px] font-bold text-[#0F0F0F] mb-1">Uploaded Reference Portrait</p>
+                      <p className="text-[13px] font-bold text-[#0F0F0F] mb-1">
+                        {referencePhotoUrl && !localPhotoPreview
+                          ? '✓ Verified Candidate Profile Photo'
+                          : 'Uploaded Reference Portrait'}
+                      </p>
                       {photoUploading && (
                         <div className="flex items-center gap-1.5 text-xs text-purple-600 font-medium">
                           <Loader2 size={13} className="animate-spin" /> Validating face with AWS Rekognition...
@@ -488,7 +492,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                         }}
                         className="mt-2 text-[11px] font-medium text-[#A4123F] hover:underline"
                       >
-                        Choose a different photo
+                        Change photo
                       </button>
                     </div>
                   </div>

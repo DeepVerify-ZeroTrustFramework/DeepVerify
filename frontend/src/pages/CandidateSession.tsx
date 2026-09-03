@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ShieldCheck, Loader2, Code2, AlertCircle, Clock, AlertTriangle, 
   Monitor, Users, Smartphone, Maximize2, Minimize2, Camera, 
-  CheckCircle2, XCircle, RefreshCw, UploadCloud, Sparkles, ShieldAlert, Lock, Unlock
+  CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
@@ -86,18 +86,46 @@ export default function CandidateSession() {
   const [faceSimilarity, setFaceSimilarity] = useState<number | null>(null)
   const [faceVerificationStatus, setFaceVerificationStatus] = useState<'PENDING' | 'VERIFIED' | 'FAILED' | 'ERROR'>('PENDING')
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null)
-  const [liveSnapshotUrl, setLiveSnapshotUrl] = useState<string | null>(null)
+  const [, setLiveSnapshotUrl] = useState<string | null>(null)
   const [isVerifying, setIsVerifying] = useState(false)
-  const [verificationMessage, setVerificationMessage] = useState<string | null>(null)
+  const [, setVerificationMessage] = useState<string | null>(null)
   const [verificationError, setVerificationError] = useState<string | null>(null)
   const [showVerificationModal, setShowVerificationModal] = useState(true)
-  const [showReuploadModal, setShowReuploadModal] = useState(false)
+  const [, setShowReuploadModal] = useState(false)
   const [reuploading, setReuploading] = useState(false)
   const [reuploadError, setReuploadError] = useState<string | null>(null)
 
   const selfVideoRef = useRef<HTMLVideoElement | null>(null)
   const modalLiveVideoRef = useRef<HTMLVideoElement | null>(null)
   const reuploadInputRef = useRef<HTMLInputElement | null>(null)
+
+  // ── Exit Interview States ──
+  const [showEndModal, setShowEndModal] = useState(false)
+  const [isEnded, setIsEnded] = useState(false)
+  const [endingSession, setEndingSession] = useState(false)
+
+  const handleEndInterview = async () => {
+    setEndingSession(true)
+    try {
+      if (session?.session_id) {
+        await fetch(`/api/sessions/${session.session_id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'COMPLETED' }),
+        })
+      }
+    } catch (e) {
+      console.warn('Failed to mark session completed', e)
+    } finally {
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop())
+      }
+      rtc.stop()
+      setEndingSession(false)
+      setShowEndModal(false)
+      setIsEnded(true)
+    }
+  }
 
   // Candidate warning toasts
   const [violations, setViolations] = useState<ToastViolation[]>([])
@@ -410,6 +438,58 @@ export default function CandidateSession() {
     )
   }
 
+  if (isEnded) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-full max-w-lg bg-white border border-[#EAEAEA] rounded-3xl p-10 shadow-lg flex flex-col items-center">
+          <div className="w-20 h-20 rounded-full bg-[#F0FDF4] border-2 border-[#16A34A] flex items-center justify-center text-[#16A34A] mb-6 shadow-md shadow-green-100">
+            <CheckCircle2 size={42} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#0F0F0F] mb-2">Interview Concluded</h1>
+          <p className="text-sm text-[#555] mb-6 max-w-md leading-relaxed">
+            Thank you, <strong className="text-[#0F0F0F]">{session?.candidate_name || 'Candidate'}</strong>! Your technical interview session has been successfully finalized and submitted.
+          </p>
+
+          <div className="w-full bg-[#F9F9FB] border border-[#E5E5E8] rounded-2xl p-5 mb-8 text-left space-y-3">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Session ID:</span>
+              <span className="font-mono font-bold text-[#0F0F0F]">{session?.session_id}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Role:</span>
+              <span className="font-semibold text-[#0F0F0F]">{session?.role || 'Software Engineer'}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Identity Verification:</span>
+              <span className="inline-flex items-center gap-1 font-bold text-[#1A6B3C]">
+                <CheckCircle2 size={13} /> {faceVerified ? 'Verified via AWS Rekognition' : 'Submitted'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-[#6B6B6B]">Total Duration:</span>
+              <span className="font-mono font-bold text-[#0F0F0F]">{formatTime(elapsed)}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <button
+              onClick={() => navigate('/student/inbox')}
+              className="flex-1 py-3 px-5 rounded-xl bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Home size={15} /> Return to Portal
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="py-3 px-5 rounded-xl border border-[#D5D5D7] hover:bg-gray-50 text-xs font-semibold text-[#3A3A3A] transition-colors cursor-pointer"
+            >
+              Exit to Homepage
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-screen bg-[#0A0A0A] flex flex-col overflow-hidden text-white font-sans relative">
       {/* Violation Alert Toasts */}
@@ -477,6 +557,15 @@ export default function CandidateSession() {
             <Clock size={14} />
             <span className="font-mono">{formatTime(elapsed)}</span>
           </div>
+
+          <button
+            onClick={() => setShowEndModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors cursor-pointer"
+            title="End Interview"
+          >
+            <LogOut size={14} />
+            <span>End Interview</span>
+          </button>
         </div>
       </div>
 
@@ -928,6 +1017,56 @@ export default function CandidateSession() {
                 )}
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* End Interview Confirmation Modal */}
+      {showEndModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#16181F] border border-gray-800 rounded-2xl p-6 shadow-2xl animate-fade-in text-white">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center">
+                <LogOut size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Conclude & Submit Interview?</h3>
+                <p className="text-xs text-gray-400">This action will finalize your session</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-300 mb-6 leading-relaxed">
+              Are you sure you want to end your interview? Your camera feed, code submissions, and identity verification logs will be saved and finalized for review.
+            </p>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowEndModal(false)}
+                disabled={endingSession}
+                className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-300 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleEndInterview}
+                disabled={endingSession}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-600/20"
+              >
+                {endingSession ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Submitting...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogOut size={14} />
+                    <span>Yes, End Interview</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

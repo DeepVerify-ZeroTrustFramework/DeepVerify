@@ -10,11 +10,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 from pydantic import BaseModel
 
-from db.mongo import get_sessions_collection
-from db.redis_client import publish_alert, publish_trust_score
+from db.mongo import get_sessions_collection, get_users_collection
+from db.redis_client import publish_alert
 from models.schemas import (
-    FaceVerificationResponse, FaceVerificationStatus,
-    Alert, AlertType, AlertSeverity
+    FaceVerificationStatus, FaceVerificationResponse, Alert, AlertType, AlertSeverity
 )
 from modules.face_verifier import face_verifier_service, LOCAL_UPLOAD_DIR
 
@@ -24,22 +23,48 @@ router = APIRouter()
 _reference_photo_bytes: dict[str, bytes] = {}
 
 
-def _get_reference_bytes(session_id: str, doc: dict) -> Optional[bytes]:
-    """Retrieve reference photo bytes from memory or disk/URL."""
+async def _get_reference_bytes(session_id: str, doc: dict) -> Optional[bytes]:
+    """Retrieve reference photo bytes from memory, disk, candidate profile, or URL."""
     if session_id in _reference_photo_bytes:
         return _reference_photo_bytes[session_id]
 
-    # Try local storage path from document
     face_data = doc.get("face_verification", {})
     ref_url = face_data.get("reference_image_url", "")
-    if ref_url and ref_url.startswith("/api/uploads/"):
-        rel_path = ref_url.replace("/api/uploads/", "")
-        local_file = LOCAL_UPLOAD_DIR / rel_path
-        if local_file.exists():
-            with open(local_file, "rb") as f:
-                data = f.read()
-                _reference_photo_bytes[session_id] = data
-                return data
+
+    # If reference photo not yet in session document, attempt to load from candidate's profile
+    if not ref_url and doc.get("candidate_email"):
+        try:
+            users_col = get_users_collection()
+            user = await users_col.find_one({"email": doc["candidate_email"].lower()})
+            if user and user.get("profile_photo_url"):
+                ref_url = user["profile_photo_url"]
+                sessions_col = get_sessions_collection()
+                await sessions_col.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"face_verification.reference_image_url": ref_url}}
+                )
+        except Exception:
+            pass
+
+    if ref_url:
+        if ref_url.startswith("/api/uploads/"):
+            rel_path = ref_url.replace("/api/uploads/", "")
+            local_file = LOCAL_UPLOAD_DIR / rel_path
+            if local_file.exists():
+                with open(local_file, "rb") as f:
+                    data = f.read()
+                    _reference_photo_bytes[session_id] = data
+                    return data
+        elif ref_url.startswith("http://") or ref_url.startswith("https://"):
+            try:
+                import urllib.request
+                req = urllib.request.Request(ref_url, headers={"User-Agent": "DeepVerify/2.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = resp.read()
+                    _reference_photo_bytes[session_id] = data
+                    return data
+            except Exception:
+                pass
 
     return None
 
@@ -142,11 +167,11 @@ async def verify_candidate_face(
         raise HTTPException(status_code=400, detail="Invalid snapshot image data.")
 
     # Retrieve source reference photo bytes
-    ref_bytes = _get_reference_bytes(session_id, doc)
+    ref_bytes = await _get_reference_bytes(session_id, doc)
     if not ref_bytes:
         raise HTTPException(
             status_code=400,
-            detail="Reference photograph has not been uploaded yet for this session. Please upload your ID photo first."
+            detail="Reference photograph has not been uploaded yet for this session. Please ensure your profile photograph is uploaded."
         )
 
     # Perform AWS Rekognition Face Comparison
@@ -163,7 +188,7 @@ async def verify_candidate_face(
         filename=file_id,
     )
 
-    ref_url = doc.get("face_verification", {}).get("reference_image_url", "")
+    ref_url = doc.get("face_verification", {}).get("reference_image_url") or ""
     is_verified = result["verified"]
     similarity_score = result.get("similarity")
     verification_status = result["status"]
@@ -226,13 +251,23 @@ async def get_face_verification_status(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     face_data = doc.get("face_verification", {})
+    ref_url = face_data.get("reference_image_url")
+    if not ref_url and doc.get("candidate_email"):
+        try:
+            users_col = get_users_collection()
+            user = await users_col.find_one({"email": doc["candidate_email"].lower()})
+            if user and user.get("profile_photo_url"):
+                ref_url = user["profile_photo_url"]
+        except Exception:
+            pass
+
     return {
         "session_id": session_id,
         "verified": face_data.get("verified", False),
         "similarity": face_data.get("similarity"),
         "status": face_data.get("status", "PENDING"),
         "message": face_data.get("message", "Pending identity verification."),
-        "reference_image_url": face_data.get("reference_image_url"),
+        "reference_image_url": ref_url,
         "live_snapshot_url": face_data.get("live_snapshot_url"),
         "verified_at": face_data.get("verified_at"),
     }

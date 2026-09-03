@@ -33,6 +33,14 @@ async def connect_mongodb():
     await _db.telemetry.create_index([("session_id", 1), ("timestamp", 1)])
     await _db.alerts.create_index([("session_id", 1), ("timestamp", -1)])
     await _db.behavioral_events.create_index([("session_id", 1), ("timestamp", 1)])
+    await _db.users.create_index("email", unique=True)
+    await _db.users.create_index("user_id", unique=True)
+    await _db.users.create_index("role")
+    await _db.invitations.create_index("invitation_id", unique=True)
+    await _db.invitations.create_index("candidate_email")
+    await _db.invitations.create_index("candidate_id")
+    await _db.invitations.create_index("recruiter_id")
+    await _db.invitations.create_index("session_id")
 
     print(f"[MongoDB] Connected to {mongo_url}/{db_name}")
 
@@ -54,6 +62,14 @@ def get_db() -> AsyncIOMotorDatabase:
 
 def get_sessions_collection():
     return get_db().sessions
+
+
+def get_users_collection():
+    return get_db().users
+
+
+def get_invitations_collection():
+    return get_db().invitations
 
 
 def get_telemetry_collection():
