@@ -27,6 +27,10 @@ export function useSystemCheck(sessionId: string) {
   const [rppgBpm, setRppgBpm] = useState(0)
   const [gazeLambda, setGazeLambda] = useState<number | null>(null)
   const [consentTimestamp, setConsentTimestamp] = useState<string | null>(null)
+  const [referencePhotoUrl, setReferencePhotoUrl] = useState<string | null>(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const [isPhotoValidated, setIsPhotoValidated] = useState(false)
 
   // Step 1: Permissions
   const requestPermissions = async () => {
@@ -124,7 +128,41 @@ export function useSystemCheck(sessionId: string) {
     return true
   }
 
-  // Step 6: Consent
+  // Step 6: Upload Reference Identity Photograph
+  const uploadReferencePhoto = async (file: File): Promise<boolean> => {
+    setPhotoUploading(true)
+    setPhotoError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch(`/api/face-verification/reference-photo/${sessionId}`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        const errorMsg = data?.detail?.message || (typeof data?.detail === 'string' ? data.detail : 'Face validation failed.')
+        setPhotoError(errorMsg)
+        setIsPhotoValidated(false)
+        return false
+      }
+
+      setReferencePhotoUrl(data.reference_image_url)
+      setIsPhotoValidated(true)
+      setPhotoError(null)
+      return true
+    } catch (err: any) {
+      setPhotoError('Network error uploading photograph. Please check your connection.')
+      setIsPhotoValidated(false)
+      return false
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  // Step 7: Consent
   const submitConsent = async (text: string) => {
     if (text !== 'I CONSENT') return false
     try {
@@ -140,7 +178,7 @@ export function useSystemCheck(sessionId: string) {
     }
   }
 
-  // Step 7: Finish
+  // Step 8: Finish
   const finishCheck = async () => {
     try {
       await fetch(`/api/sessions/${sessionId}`, {
@@ -169,6 +207,10 @@ export function useSystemCheck(sessionId: string) {
     rppgBpm,
     gazeLambda,
     consentTimestamp,
+    referencePhotoUrl,
+    photoUploading,
+    photoError,
+    isPhotoValidated,
     isDone,
     actions: {
       requestPermissions,
@@ -176,6 +218,7 @@ export function useSystemCheck(sessionId: string) {
       enrollPrnu,
       enrollRppg,
       enrollGaze,
+      uploadReferencePhoto,
       submitConsent,
       finishCheck,
     }

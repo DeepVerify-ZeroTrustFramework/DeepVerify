@@ -10,7 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.mongo import connect_mongodb, close_mongodb
 from db.redis_client import connect_redis, close_redis
-from api.routes import session, enrollment, frames, dashboard, signaling, report, ws_handlers, webrtc
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from api.routes import session, enrollment, frames, dashboard, signaling, report, ws_handlers, webrtc, tts, face_verification
 
 
 @asynccontextmanager
@@ -49,8 +51,15 @@ app.include_router(frames.router, tags=["Frames & Analysis"])
 app.include_router(dashboard.router, tags=["Dashboard"])
 app.include_router(signaling.router, tags=["WebRTC Signaling"])
 app.include_router(report.router, prefix="/api", tags=["Reports"])
+app.include_router(tts.router, prefix="/api", tags=["Text-to-Speech"])
+app.include_router(face_verification.router, prefix="/api", tags=["Face Verification"])
 app.include_router(ws_handlers.router, tags=["WebSocket Handlers"])
 app.include_router(webrtc.router, tags=["WebRTC SFU"])
+
+# Static directory for local image uploads fallback
+uploads_dir = Path(__file__).resolve().parent.parent / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 
 @app.get("/api/health")

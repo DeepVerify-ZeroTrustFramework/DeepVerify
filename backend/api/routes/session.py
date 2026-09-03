@@ -118,6 +118,7 @@ async def get_session(session_id: str):
         created_at=doc["created_at"],
         start_time=doc.get("start_time"),
         end_time=doc.get("end_time"),
+        face_verification=doc.get("face_verification"),
     )
 
 
@@ -166,6 +167,13 @@ async def get_session_by_token(token: str):
         "check_step": doc.get("check_step", 0),
         "token_role": role,
         "token": doc["token"],
+        "face_verification": doc.get("face_verification", {
+            "verified": False,
+            "status": "PENDING",
+            "reference_image_url": None,
+            "live_snapshot_url": None,
+            "similarity": None
+        }),
         "created_at": doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else doc["created_at"],
     }
 

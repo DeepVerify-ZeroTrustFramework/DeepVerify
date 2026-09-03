@@ -1,5 +1,8 @@
 import type { TrustAlert } from '../hooks/useTrustScore'
-import { AlertCircle, ShieldAlert, AlertTriangle, Info, Check, Clock } from 'lucide-react'
+import { 
+  AlertCircle, ShieldAlert, AlertTriangle, Info, Check, Clock,
+  Users, Smartphone, Monitor, EyeOff, Sparkles, Copy
+} from 'lucide-react'
 
 export default function AlertFeed({ 
   alerts, 
@@ -29,7 +32,14 @@ export default function AlertFeed({
     }
   }
 
-  const getIcon = (severity: string, className: string) => {
+  const getIcon = (alertType: string, severity: string, className: string) => {
+    if (alertType.includes('MULTI_FACE')) return <Users size={16} className={className} />
+    if (alertType.includes('PROHIBITED_OBJECT')) return <Smartphone size={16} className={className} />
+    if (alertType.includes('MULTI_MONITOR')) return <Monitor size={16} className={className} />
+    if (alertType.includes('ABSENCE')) return <EyeOff size={16} className={className} />
+    if (alertType.includes('SCREEN_REFLECTION')) return <Sparkles size={16} className={className} />
+    if (alertType.includes('CLIPBOARD') || alertType.includes('PASTE')) return <Copy size={16} className={className} />
+
     switch (severity) {
       case 'CRITICAL': return <ShieldAlert size={16} className={className} />
       case 'HIGH': return <AlertCircle size={16} className={className} />

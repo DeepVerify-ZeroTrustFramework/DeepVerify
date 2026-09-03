@@ -25,6 +25,8 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    env_file:
+      - ./backend/.env
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - MONGODB_DB=deepverify
@@ -32,6 +34,14 @@ services:
       - JWT_SECRET=deepverify-dev-secret-change-in-production
       - CORS_ORIGINS=http://localhost:5173
       - WATCHFILES_FORCE_POLLING=1
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-sk_0l2l2gl8_XCCV2rvtlznZCfpFRsW9xAFl}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-AKIATVEB66WAAI2NUJWA}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-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}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - REKOGNITION_SIMILARITY_THRESHOLD=${REKOGNITION_SIMILARITY_THRESHOLD:-80.0}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME:-kqwq9gmu}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY:-158693447845986}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET:-DW_p6XUseTCPpZPa3KoHc0da4NI}
     depends_on:
       - mongodb
       - redis

@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ShieldCheck, Loader2, Camera, AlertCircle, Wifi, Cpu, HeartPulse, Eye, FileText, CheckCircle2 } from 'lucide-react'
+import { 
+  ShieldCheck, Loader2, Camera, AlertCircle, Wifi, Cpu, 
+  HeartPulse, Eye, FileText, CheckCircle2, Volume2, VolumeX, Monitor,
+  UploadCloud, UserCheck, Image as ImageIcon
+} from 'lucide-react'
 import { useSystemCheck } from '../hooks/useSystemCheck'
+import { useTTS } from '../hooks/useTTS'
 
 export default function SystemCheck() {
   const { token } = useParams<{ token: string }>()
@@ -52,10 +57,15 @@ function SystemCheckWizard({ session }: { session: any }) {
   const { 
     currentStep, nextStep, stream, deviceName, virtualError,
     rtt, connType, prnuFrames, rppgBpm, gazeLambda,
+    referencePhotoUrl, photoUploading, photoError, isPhotoValidated,
     actions
   } = useSystemCheck(session.session_id)
+
+  const { isMuted, isSpeaking, toggleMute, speak, cancel } = useTTS(session.session_id)
   
   const videoRef = useRef<HTMLVideoElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [localPhotoPreview, setLocalPhotoPreview] = useState<string | null>(null)
   const [stepLoading, setStepLoading] = useState(false)
   const [consentInput, setConsentInput] = useState('')
   const navigate = useNavigate()
@@ -66,30 +76,131 @@ function SystemCheckWizard({ session }: { session: any }) {
     }
   }, [stream])
 
+  // Narrate instructions when entering each step
+  useEffect(() => {
+    const stepNarrations: Record<number, string> = {
+      1: "Camera and Hardware Access. DeepVerify requires raw access to your physical camera to generate cryptographic hardware fingerprints.",
+      2: "Network Profiling. Measuring your STUN and TURN latencies and establishing a connection baseline.",
+      3: "PRNU Hardware Calibration. Extracting the unique sensor noise pattern from your camera. Please keep the camera completely still for 3 seconds.",
+      4: "rPPG Liveness Baseline. Extracting micro-color variations from your face to establish a biological pulse baseline. Look directly at the camera.",
+      5: "Behavioral and Gaze Setup. Mapping your screen bounding box and natural head pose. Look at the corners of your screen.",
+      6: "Identity Photograph Upload. Please upload a clear passport-size photo. This image will be verified against your live video stream using AWS Rekognition.",
+      7: "Forensic Consent. By proceeding, you consent to continuous forensic analysis of your video stream, network activity, and browser behavior during this session. Type I CONSENT to proceed.",
+      8: "You're all set. Your device has been verified and enrolled. Good luck with your interview."
+    }
+
+    const text = stepNarrations[currentStep]
+    if (text) {
+      speak(text)
+    }
+
+    return () => {
+      cancel()
+    }
+  }, [currentStep, speak, cancel])
+
+  // Read out any error that appears during device checks
+  useEffect(() => {
+    if (virtualError) {
+      speak(virtualError)
+    }
+  }, [virtualError, speak])
+
+  // Read out network measurement results when ready in Step 2
+  useEffect(() => {
+    if (connType && rtt !== null && currentStep === 2) {
+      speak(`Network classified as ${connType} with round trip time of ${rtt} milliseconds.`)
+    }
+  }, [connType, rtt, currentStep, speak])
+
   const steps = [
     { n: 1, label: 'Permissions' },
     { n: 2, label: 'Network' },
     { n: 3, label: 'PRNU' },
     { n: 4, label: 'rPPG' },
     { n: 5, label: 'Gaze' },
-    { n: 6, label: 'Consent' },
-    { n: 7, label: 'Ready' }
+    { n: 6, label: 'ID Photo' },
+    { n: 7, label: 'Consent' },
+    { n: 8, label: 'Ready' }
   ]
 
   const handleStep = async () => {
     setStepLoading(true)
     let ok = false
-    if (currentStep === 1) ok = await actions.requestPermissions()
-    if (currentStep === 2) ok = await actions.measureNetwork()
-    if (currentStep === 3) ok = await actions.enrollPrnu()
-    if (currentStep === 4) ok = await actions.enrollRppg()
-    if (currentStep === 5) ok = await actions.enrollGaze()
-    if (currentStep === 6) ok = await actions.submitConsent(consentInput)
+
+    if (currentStep === 1) {
+      ok = await actions.requestPermissions()
+      if (ok) {
+        speak("Camera verified.")
+      }
+    }
+
+    if (currentStep === 2) {
+      ok = await actions.measureNetwork()
+      if (!ok) {
+        speak("Network measurement failed. Please check your internet connection.")
+      }
+    }
+
+    if (currentStep === 3) {
+      ok = await actions.enrollPrnu()
+      if (ok) {
+        speak("Camera sensor noise calibrated.")
+      } else {
+        speak("PRNU calibration failed. Please ensure the camera remains still.")
+      }
+    }
+
+    if (currentStep === 4) {
+      ok = await actions.enrollRppg()
+      if (ok) {
+        speak("Biological pulse baseline established.")
+      } else {
+        speak("Biological liveness baseline capture failed. Please look directly at the camera and ensure proper lighting.")
+      }
+    }
+
+    if (currentStep === 5) {
+      ok = await actions.enrollGaze()
+      if (ok) {
+        speak("Screen and gaze calibration complete.")
+      } else {
+        speak("Gaze calibration failed. Please look at the screen.")
+      }
+    }
+
+    if (currentStep === 6) {
+      if (!isPhotoValidated) {
+        speak("Please upload a clear identity photograph to proceed.")
+        ok = false
+      } else {
+        speak("Reference photo verified.")
+        ok = true
+      }
+    }
+
     if (currentStep === 7) {
+      if (consentInput !== 'I CONSENT') {
+        speak("Please type I CONSENT exactly to proceed.")
+        ok = false
+      } else {
+        ok = await actions.submitConsent(consentInput)
+        if (ok) {
+          speak("Consent confirmed.")
+        } else {
+          speak("Consent submission failed. Please try again.")
+        }
+      }
+    }
+
+    if (currentStep === 8) {
       ok = await actions.finishCheck()
       if (ok) {
+        cancel()
         navigate(`/session/${session.token}`, { replace: true })
         return
+      } else {
+        speak("Failed to complete system check. Please try again.")
       }
     }
 
@@ -107,8 +218,36 @@ function SystemCheckWizard({ session }: { session: any }) {
           </div>
           <span className="text-sm font-bold text-[#0F0F0F]">System Check</span>
         </div>
-        <div className="text-[13px] font-medium text-[#6B6B6B]">
-          Candidate: {session.candidate_name}
+
+        <div className="flex items-center gap-4">
+          {/* Speaking indicator */}
+          {isSpeaking && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F5] border border-[#F5C2CD] text-[12px] font-semibold text-[#A4123F] animate-fade-in">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#A4123F] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#A4123F]"></span>
+              </span>
+              <span>Speaking...</span>
+            </div>
+          )}
+
+          {/* Mute / Unmute Toggle */}
+          <button
+            onClick={toggleMute}
+            title={isMuted ? "Unmute voice narration" : "Mute voice narration"}
+            className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 text-xs font-medium ${
+              isMuted 
+                ? 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200' 
+                : 'bg-white text-[#A4123F] border-[#E4E4E6] hover:bg-[#FDF2F5]'
+            }`}
+          >
+            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            <span>{isMuted ? 'Muted' : 'Voice on'}</span>
+          </button>
+
+          <div className="text-[13px] font-medium text-[#6B6B6B] border-l border-[#E4E4E6] pl-4">
+            Candidate: {session.candidate_name}
+          </div>
         </div>
       </div>
 
@@ -125,8 +264,8 @@ function SystemCheckWizard({ session }: { session: any }) {
               ))}
             </div>
             <div className="flex justify-between text-[11px] font-semibold text-[#A4123F] uppercase tracking-wider">
-              <span>Step {currentStep} of 7</span>
-              <span>{steps[currentStep - 1].label}</span>
+              <span>Step {currentStep} of {steps.length}</span>
+              <span>{steps[currentStep - 1]?.label || ''}</span>
             </div>
           </div>
 
@@ -145,6 +284,12 @@ function SystemCheckWizard({ session }: { session: any }) {
                 {virtualError && (
                   <div className="p-3 mb-6 rounded-lg bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex gap-2">
                     <AlertCircle size={16} className="shrink-0 mt-0.5" /> {virtualError}
+                  </div>
+                )}
+                {typeof window !== 'undefined' && Boolean((window.screen as any)?.isExtended) && (
+                  <div className="p-3 mb-6 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2">
+                    <Monitor size={16} className="shrink-0 mt-0.5" />
+                    <span><strong>Advisory:</strong> Multiple monitors detected. Please disconnect secondary displays for an optimal integrity score.</span>
                   </div>
                 )}
                 <div className="mt-auto">
@@ -268,8 +413,101 @@ function SystemCheckWizard({ session }: { session: any }) {
               </div>
             )}
 
-            {/* Step 6: Consent */}
+            {/* Step 6: Identity Photograph Upload */}
             {currentStep === 6 && (
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center mb-6">
+                  <UserCheck className="text-purple-600" />
+                </div>
+                <h2 className="text-xl font-bold text-[#0F0F0F] mb-2">Identity Photograph Upload</h2>
+                <p className="text-[13px] text-[#6B6B6B] mb-5 leading-relaxed">
+                  Upload a clear passport-size or identity-style photograph. This will be securely stored and used as the reference image to verify your identity during the live interview via AWS Rekognition.
+                </p>
+
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      setLocalPhotoPreview(URL.createObjectURL(file))
+                      const success = await actions.uploadReferencePhoto(file)
+                      if (success) {
+                        speak("Identity photograph verified.")
+                      } else {
+                        speak("Photograph validation failed. Please ensure a single clear face is visible.")
+                      }
+                    }
+                  }}
+                />
+
+                {/* Upload or Preview Box */}
+                {!localPhotoPreview ? (
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-[#D0D0D5] hover:border-[#A4123F] rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAFAFB] hover:bg-[#FDF2F5] mb-5 group"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-white border border-[#E4E4E6] flex items-center justify-center mb-3 shadow-sm group-hover:scale-105 transition-transform">
+                      <UploadCloud className="text-[#A4123F]" size={22} />
+                    </div>
+                    <p className="text-[14px] font-bold text-[#0F0F0F] mb-1">Click to upload reference photo</p>
+                    <p className="text-[11px] text-[#6B6B6B]">JPG, PNG or WEBP · Max 5MB · Single person portrait</p>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4 p-4 rounded-2xl border border-[#E4E4E6] bg-[#FAFAFB] mb-5">
+                    <img 
+                      src={localPhotoPreview} 
+                      alt="Candidate Reference" 
+                      className="w-20 h-24 object-cover rounded-xl border border-white shadow-sm"
+                    />
+                    <div className="flex-1">
+                      <p className="text-[13px] font-bold text-[#0F0F0F] mb-1">Uploaded Reference Portrait</p>
+                      {photoUploading && (
+                        <div className="flex items-center gap-1.5 text-xs text-purple-600 font-medium">
+                          <Loader2 size={13} className="animate-spin" /> Validating face with AWS Rekognition...
+                        </div>
+                      )}
+                      {isPhotoValidated && (
+                        <div className="flex items-center gap-1.5 text-xs text-[#1A6B3C] font-semibold">
+                          <CheckCircle2 size={14} /> Face Validated via Rekognition
+                        </div>
+                      )}
+                      {photoError && (
+                        <div className="flex items-start gap-1.5 text-[11px] text-red-600 font-medium mt-1">
+                          <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                          <span>{photoError}</span>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLocalPhotoPreview(null)
+                          fileInputRef.current?.click()
+                        }}
+                        className="mt-2 text-[11px] font-medium text-[#A4123F] hover:underline"
+                      >
+                        Choose a different photo
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-auto">
+                  <button 
+                    onClick={handleStep} 
+                    disabled={stepLoading || photoUploading || !isPhotoValidated} 
+                    className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  >
+                    {photoUploading ? <Loader2 size={16} className="animate-spin" /> : 'Confirm Photo & Continue'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 7: Consent */}
+            {currentStep === 7 && (
               <div className="flex-1 animate-fade-in">
                 <div className="w-12 h-12 rounded-xl bg-[#F7F7F8] flex items-center justify-center mb-6">
                   <FileText className="text-[#6B6B6B]" />
@@ -302,8 +540,8 @@ function SystemCheckWizard({ session }: { session: any }) {
               </div>
             )}
 
-            {/* Step 7: Ready */}
-            {currentStep === 7 && (
+            {/* Step 8: Ready */}
+            {currentStep === 8 && (
               <div className="flex-1 animate-fade-in flex flex-col items-center justify-center text-center">
                 <div className="w-16 h-16 rounded-full bg-[#E6F4ED] flex items-center justify-center mb-6 animate-check-pop">
                   <CheckCircle2 size={32} className="text-[#1A6B3C]" />

@@ -29,6 +29,7 @@ class AlertSeverity(str, Enum):
 
 class AlertType(str, Enum):
     IDENTITY_FRAUD = "IDENTITY_FRAUD"
+    FACE_MISMATCH = "FACE_MISMATCH"
     LIVENESS_FAIL = "LIVENESS_FAIL"
     DEEPFAKE_RENDERING = "DEEPFAKE_RENDERING"
     ASSISTANCE_FRAUD = "ASSISTANCE_FRAUD"
@@ -38,6 +39,13 @@ class AlertType(str, Enum):
     PRNU_PASS = "PRNU_PASS"
     RPPG_PASS = "RPPG_PASS"
     PRNU_WARN = "PRNU_WARN"
+
+
+class FaceVerificationStatus(str, Enum):
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    ERROR = "ERROR"
 
 
 class BehavioralEventType(str, Enum):
@@ -142,6 +150,27 @@ class StatusUpdate(BaseModel):
     check_step: Optional[int] = None
 
 
+class FaceVerificationData(BaseModel):
+    reference_image_url: Optional[str] = None
+    live_snapshot_url: Optional[str] = None
+    verified: bool = False
+    similarity: Optional[float] = None
+    status: FaceVerificationStatus = FaceVerificationStatus.PENDING
+    message: Optional[str] = None
+    verified_at: Optional[datetime] = None
+
+
+class FaceVerificationResponse(BaseModel):
+    session_id: str
+    verified: bool
+    similarity: Optional[float] = None
+    status: FaceVerificationStatus
+    message: str
+    reference_image_url: Optional[str] = None
+    live_snapshot_url: Optional[str] = None
+    error_code: Optional[str] = None
+
+
 # --- Response Schemas ---
 
 class SessionResponse(BaseModel):
@@ -162,6 +191,7 @@ class SessionResponse(BaseModel):
     created_at: datetime
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    face_verification: Optional[FaceVerificationData] = None
 
 
 class SessionStatusResponse(BaseModel):
@@ -260,6 +290,7 @@ class SessionDocument(BaseModel):
     enrollment: EnrollmentData = Field(default_factory=EnrollmentData)
     thresholds: SessionThresholds = Field(default_factory=SessionThresholds)
     system_check: Optional[SystemCheckResult] = None
+    face_verification: FaceVerificationData = Field(default_factory=FaceVerificationData)
     flagged_for_review: bool = False
     flag_reason: Optional[str] = None
     flagged_at: Optional[datetime] = None
