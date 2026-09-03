@@ -3,7 +3,7 @@ import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
 async def clear_db():
-    url = "mongodb+srv://krishnasaketh566_db_user:p988wgW0hnRD49rf@cluster0.cxxsqnn.mongodb.net/?appName=Cluster0"
+    url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     client = AsyncIOMotorClient(url)
     db = client["deepverify"]
     
