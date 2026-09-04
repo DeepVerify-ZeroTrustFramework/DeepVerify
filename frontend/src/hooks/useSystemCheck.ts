@@ -32,6 +32,10 @@ export function useSystemCheck(sessionId: string) {
   const [photoError, setPhotoError] = useState<string | null>(null)
   const [isPhotoValidated, setIsPhotoValidated] = useState(false)
 
+  const [demoMode, setDemoMode] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && localStorage.getItem('deepverify_demo_mode') === 'true'
+  })
+
   // Auto-detect pre-enrolled profile photo from candidate's account
   useEffect(() => {
     async function checkExistingProfilePhoto() {
@@ -64,16 +68,47 @@ export function useSystemCheck(sessionId: string) {
       setDeviceName(name)
       
       const isVirtual = VIRTUAL_SIGNATURES.some(sig => name.toLowerCase().includes(sig))
-      if (isVirtual) {
+      if (isVirtual && !demoMode) {
         setVirtualError(`Virtual camera detected: ${name}. You must use your physical webcam to proceed.`)
         return false
       }
+      setVirtualError('')
       return true
     } catch (e) {
       console.error(e)
       setVirtualError('Failed to access camera/microphone. Please allow permissions.')
       return false
     }
+  }
+
+  const toggleDemoMode = (enabled?: boolean) => {
+    const nextVal = enabled !== undefined ? enabled : !demoMode
+    setDemoMode(nextVal)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('deepverify_demo_mode', String(nextVal))
+    }
+    if (nextVal) {
+      setVirtualError('')
+    }
+    return nextVal
+  }
+
+  const bypassVirtualCheck = async () => {
+    toggleDemoMode(true)
+    setVirtualError('')
+    if (!stream) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        setStream(s)
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoDevice = devices.find(d => d.kind === 'videoinput')
+        const name = videoDevice?.label || 'Camera'
+        setDeviceName(name)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    return true
   }
 
   // Step 2: Network
@@ -233,8 +268,11 @@ export function useSystemCheck(sessionId: string) {
     photoError,
     isPhotoValidated,
     isDone,
+    demoMode,
     actions: {
       requestPermissions,
+      toggleDemoMode,
+      bypassVirtualCheck,
       measureNetwork,
       enrollPrnu,
       enrollRppg,

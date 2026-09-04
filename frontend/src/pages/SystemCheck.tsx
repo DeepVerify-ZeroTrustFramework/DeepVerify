@@ -55,7 +55,7 @@ export default function SystemCheck() {
 
 function SystemCheckWizard({ session }: { session: any }) {
   const { 
-    currentStep, nextStep, stream, deviceName, virtualError,
+    currentStep, nextStep, stream, deviceName, virtualError, demoMode,
     rtt, connType, prnuFrames, rppgBpm, gazeLambda,
     referencePhotoUrl, photoUploading, photoError, isPhotoValidated,
     actions
@@ -245,6 +245,20 @@ function SystemCheckWizard({ session }: { session: any }) {
             <span>{isMuted ? 'Muted' : 'Voice on'}</span>
           </button>
 
+          {/* Demo Mode Toggle */}
+          <button
+            onClick={() => actions.toggleDemoMode()}
+            title={demoMode ? "Demo Mode Active: Virtual camera bypass enabled" : "Enable Demo Mode (Simulate Attacker)"}
+            className={`px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 text-xs font-semibold ${
+              demoMode 
+                ? 'bg-amber-100 text-amber-900 border-amber-300 shadow-sm' 
+                : 'bg-white text-gray-500 border-[#E4E4E6] hover:bg-[#F7F7F8]'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${demoMode ? 'bg-amber-500 animate-pulse' : 'bg-gray-400'}`} />
+            <span>{demoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'}</span>
+          </button>
+
           <div className="text-[13px] font-medium text-[#6B6B6B] border-l border-[#E4E4E6] pl-4">
             Candidate: {session.candidate_name}
           </div>
@@ -282,8 +296,34 @@ function SystemCheckWizard({ session }: { session: any }) {
                   DeepVerify requires raw access to your physical camera to generate cryptographic hardware fingerprints. Virtual cameras (OBS, Snap Camera, etc.) are strictly prohibited.
                 </p>
                 {virtualError && (
-                  <div className="p-3 mb-6 rounded-lg bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex gap-2">
-                    <AlertCircle size={16} className="shrink-0 mt-0.5" /> {virtualError}
+                  <div className="p-4 mb-6 rounded-xl bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex flex-col gap-3">
+                    <div className="flex gap-2 items-start">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" /> 
+                      <div>
+                        <strong>Security Block:</strong> {virtualError}
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t border-[#FCA5A5]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-[12px] text-[#7F1D1D] font-medium">
+                        Presenting to the panel? Simulate an attacker with masked drivers:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await actions.bypassVirtualCheck()
+                          nextStep()
+                        }}
+                        className="px-3 py-1.5 bg-[#991B1B] text-white hover:bg-[#7F1D1D] rounded-lg text-xs font-bold transition-all shadow-sm w-fit cursor-pointer"
+                      >
+                        Bypass Check & Proceed &rarr;
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {demoMode && !virtualError && (
+                  <div className="p-3 mb-6 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2 items-center">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+                    <span><strong>Demo Mode Active:</strong> Virtual cameras permitted to demonstrate PRNU &amp; rPPG forensic detection.</span>
                   </div>
                 )}
                 {typeof window !== 'undefined' && Boolean((window.screen as any)?.isExtended) && (

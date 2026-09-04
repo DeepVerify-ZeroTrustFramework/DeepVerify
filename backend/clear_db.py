@@ -1,7 +1,9 @@
 import os
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
 
+load_dotenv()
 async def clear_db():
     url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     client = AsyncIOMotorClient(url)
