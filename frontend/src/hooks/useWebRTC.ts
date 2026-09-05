@@ -12,13 +12,13 @@
  * and flushed once the remote description is set.
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { getWsUrl } from '../utils/apiConfig'
 
 export type WebRTCState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error'
 
 // Build the signaling WS URL relative to current page
 function buildSignalingUrl(sessionId: string, role: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/signaling/${sessionId}?role=${role}`
+  return getWsUrl(`/ws/signaling/${sessionId}?role=${role}`)
 }
 
 // ICE servers — Google STUN is free and widely available

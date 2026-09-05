@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { getWsUrl } from '../utils/apiConfig'
 
 export interface TrustAlert {
   alertId: string
@@ -63,8 +64,7 @@ export function useTrustScore(sessionId: string) {
   useEffect(() => {
     if (!sessionId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard/${sessionId}`
+    const wsUrl = getWsUrl(`/ws/dashboard/${sessionId}`)
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { getWsUrl } from '../utils/apiConfig'
 
 export interface BehavioralSocketOptions {
   onViolation?: (message: string, type: string) => void
@@ -20,8 +21,7 @@ export function useBehavioralSocket(
   useEffect(() => {
     if (!active || !sessionId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/candidate/${sessionId}`
+    const wsUrl = getWsUrl(`/ws/candidate/${sessionId}`)
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws

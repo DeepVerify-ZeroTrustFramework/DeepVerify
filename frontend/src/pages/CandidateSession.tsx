@@ -9,6 +9,7 @@ import {
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { useBehavioralSocket } from '../hooks/useBehavioralSocket'
+import { getWsUrl } from '../utils/apiConfig'
 import GazeCapturer from '../components/GazeCapturer'
 import type { GazeData } from '../components/GazeCapturer'
 import ObjectDetector from '../components/ObjectDetector'
@@ -261,8 +262,7 @@ export default function CandidateSession() {
   useEffect(() => {
     if (!session?.session_id || !localStream) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/frames/${session.session_id}`
+    const wsUrl = getWsUrl(`/ws/frames/${session.session_id}`)
     const frameWs = new WebSocket(wsUrl)
     frameWsRef.current = frameWs
     frameWs.binaryType = 'arraybuffer'
