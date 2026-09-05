@@ -37,10 +37,22 @@ ROI_LANDMARKS = [10, 151, 9, 8, 168, 6, 197, 195, 5,  # forehead center line
                  280, 330, 266, 425, 411]               # right cheek
 
 
+import cv2
+
+# Haar cascade for face detection when landmarks are absent
+_face_cascade = None
+try:
+    _cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    _face_cascade = cv2.CascadeClassifier(_cascade_path)
+except Exception:
+    _face_cascade = None
+
+
 def get_roi_pixels(frame_bgr: np.ndarray, landmarks: list,
                    frame_h: int = 480, frame_w: int = 640) -> np.ndarray:
     """
-    Extract ROI pixels from forehead and cheek regions using MediaPipe landmarks.
+    Extract ROI pixels from forehead and cheek regions using MediaPipe landmarks,
+    falling back to OpenCV Haar face detection when landmarks are unavailable.
 
     Args:
         frame_bgr: BGR image
@@ -51,35 +63,51 @@ def get_roi_pixels(frame_bgr: np.ndarray, landmarks: list,
     Returns:
         Array of BGR pixel values from the ROI region
     """
-    if not landmarks or len(landmarks) == 0:
-        # Fallback: use center-upper region of frame as ROI
-        roi = frame_bgr[frame_h // 6: frame_h // 3, frame_w // 4: 3 * frame_w // 4]
-        return roi.reshape(-1, 3)
+    # 1. MediaPipe landmarks provided
+    if landmarks and len(landmarks) > 0:
+        points = []
+        for idx in ROI_LANDMARKS:
+            if idx < len(landmarks):
+                lm = landmarks[idx]
+                x = int(lm[0] * frame_w) if isinstance(lm, (list, tuple)) else int(lm.x * frame_w)
+                y = int(lm[1] * frame_h) if isinstance(lm, (list, tuple)) else int(lm.y * frame_h)
+                points.append((x, y))
 
-    # Convert normalized landmarks to pixel coordinates
-    points = []
-    for idx in ROI_LANDMARKS:
-        if idx < len(landmarks):
-            lm = landmarks[idx]
-            x = int(lm[0] * frame_w) if isinstance(lm, (list, tuple)) else int(lm.x * frame_w)
-            y = int(lm[1] * frame_h) if isinstance(lm, (list, tuple)) else int(lm.y * frame_h)
-            points.append((x, y))
+        if len(points) >= 3:
+            xs = [p[0] for p in points]
+            ys = [p[1] for p in points]
+            x_min, x_max = max(0, min(xs)), min(frame_w, max(xs))
+            y_min, y_max = max(0, min(ys)), min(frame_h, max(ys))
 
-    if len(points) < 3:
-        roi = frame_bgr[frame_h // 6: frame_h // 3, frame_w // 4: 3 * frame_w // 4]
-        return roi.reshape(-1, 3)
+            if x_max > x_min and y_max > y_min:
+                roi = frame_bgr[y_min:y_max, x_min:x_max]
+                if roi.size > 0:
+                    return roi.reshape(-1, 3)
 
-    # Create bounding box from landmark points
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    x_min, x_max = max(0, min(xs)), min(frame_w, max(xs))
-    y_min, y_max = max(0, min(ys)), min(frame_h, max(ys))
+    # 2. Fallback: OpenCV Haar Cascade face detection
+    if _face_cascade is not None and not _face_cascade.empty():
+        try:
+            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+            # Use smaller minSize (30x30) and lower minNeighbors (2) for reliable face capture at 320x240
+            faces = _face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=2, minSize=(30, 30))
+            if len(faces) > 0:
+                fx, fy, fw, fh = max(faces, key=lambda r: r[2] * r[3])
+                # Forehead ROI: upper 10% to 35% of face, center 60% width
+                y1 = max(0, fy + int(fh * 0.10))
+                y2 = min(frame_h, fy + int(fh * 0.35))
+                x1 = max(0, fx + int(fw * 0.20))
+                x2 = min(frame_w, fx + int(fw * 0.80))
+                if y2 > y1 and x2 > x1:
+                    roi = frame_bgr[y1:y2, x1:x2]
+                    if roi.size > 0:
+                        return roi.reshape(-1, 3)
+        except Exception:
+            pass
 
-    if x_max <= x_min or y_max <= y_min:
-        roi = frame_bgr[frame_h // 6: frame_h // 3, frame_w // 4: 3 * frame_w // 4]
-        return roi.reshape(-1, 3)
-
-    roi = frame_bgr[y_min:y_max, x_min:x_max]
+    # 3. Last-resort static fallback: central face area (where user's head sits in frame)
+    y1, y2 = int(frame_h * 0.15), int(frame_h * 0.55)
+    x1, x2 = int(frame_w * 0.25), int(frame_w * 0.75)
+    roi = frame_bgr[y1:y2, x1:x2]
     return roi.reshape(-1, 3)
 
 
@@ -125,7 +153,7 @@ def compute_pos_signal(rgb_timeseries: List[Tuple[float, float, float]],
     Returns:
         Bandpass-filtered pulse signal as 1D numpy array
     """
-    if len(rgb_timeseries) < 30:  # Need at least 1 second of data
+    if len(rgb_timeseries) < 32:  # Need at least 32 samples for 4th-order Butterworth padlen (27)
         return np.array([])
 
     sR = np.array([x[0] for x in rgb_timeseries], dtype=np.float64)
@@ -139,7 +167,6 @@ def compute_pos_signal(rgb_timeseries: List[Tuple[float, float, float]],
 
     # Normalize by running mean
     for sig in [sR, sG, sB]:
-        # Use cumulative sum for efficient running mean
         cumsum = np.cumsum(np.insert(sig, 0, 0))
         n = len(sig)
         for i in range(n):
@@ -167,74 +194,105 @@ def compute_pos_signal(rgb_timeseries: List[Tuple[float, float, float]],
     high = max(low + 0.01, min(high, 0.99))
 
     b, a = sp_signal.butter(4, [low, high], btype='bandpass')
-    h_filtered = sp_signal.filtfilt(b, a, h)
+    try:
+        padlen = min(27, len(h) - 1)
+        h_filtered = sp_signal.filtfilt(b, a, h, padlen=padlen)
+    except Exception:
+        return np.array([])
 
     return h_filtered
 
 
-def detect_liveness(h_filtered: np.ndarray, fs: float = 30.0,
+def detect_liveness(h_filtered: np.ndarray, fs: float = 10.0,
                     snr_threshold_db: float = 3.0) -> Tuple[bool, float, float]:
     """
-    FFT-based liveness detection: check for dominant frequency + SNR > threshold.
+    FFT-based liveness detection using in-band harmonic signal-to-noise ratio.
+    Reference: de Haan & Jeanne (2013) POS method; Wang et al. (2017).
 
-    A real human face produces a periodic pulse signal with a clear spectral peak
-    in the 0.7-3.5 Hz band (42-210 BPM). Deepfake videos, pre-recorded videos,
-    and photos lack this biological signal.
+    A real human pulse produces a sharp spectral peak at fundamental cardiac frequency f0
+    (0.7-3.5 Hz / 42-210 BPM) and its harmonic 2*f0.
+    Pre-recorded video, screens, and noise lack coherent periodicity and exhibit
+    flat/diffuse spectral power across the physiological band, yielding low in-band SNR.
 
     Args:
         h_filtered: Bandpass-filtered pulse signal from compute_pos_signal()
         fs: Sampling frequency in Hz
-        snr_threshold_db: Per-candidate β threshold from enrollment (NOT global 3.0)
+        snr_threshold_db: Per-candidate β threshold from enrollment
 
     Returns:
         (is_live, snr_db, heart_rate_bpm) tuple
     """
-    if len(h_filtered) < 30:
+    if len(h_filtered) < 20:
         return False, 0.0, 0.0
 
-    # Compute FFT power spectrum
-    freqs = np.fft.rfftfreq(len(h_filtered), d=1.0 / fs)
-    fft_mag = np.abs(np.fft.rfft(h_filtered)) ** 2
+    # Zero-pad to 256 points for smooth sub-Hz frequency resolution (~2.3 BPM per bin at 10Hz)
+    N = len(h_filtered)
+    N_fft = max(256, 2 ** int(np.ceil(np.log2(N)) + 2))
+    windowed = (h_filtered - np.mean(h_filtered)) * np.hanning(N)
+    freqs = np.fft.rfftfreq(N_fft, d=1.0 / fs)
+    fft_mag = np.abs(np.fft.rfft(windowed, n=N_fft)) ** 2
 
-    # Bandpass mask [0.7, 3.5] Hz (physiological heart rate range)
+    # Physiological band [0.7, 3.5] Hz
     band_mask = (freqs >= 0.7) & (freqs <= 3.5)
+    band_freqs = freqs[band_mask]
     band_power = fft_mag[band_mask]
 
-    if len(band_power) == 0:
+    if len(band_power) == 0 or np.sum(band_power) < 1e-12:
         return False, 0.0, 0.0
 
-    # Find peak in band
-    peak_power = np.max(band_power)
+    # 1. Peak frequency f0 in physiological band
+    peak_idx = np.argmax(band_power)
+    f0 = float(band_freqs[peak_idx])
+    peak_power = float(band_power[peak_idx])
+    heart_rate_bpm = float(f0 * 60.0)
 
-    # Noise power: everything outside the band
-    noise_mask = ~band_mask & (freqs > 0)  # Exclude DC
-    noise_power_arr = fft_mag[noise_mask]
-    noise_power = np.mean(noise_power_arr) if len(noise_power_arr) > 0 else 1e-10
+    # 2. In-band harmonic signal window (f0 +- 0.18 Hz and 2*f0 +- 0.18 Hz)
+    delta_f = 0.18
+    fund_mask = (band_freqs >= (f0 - delta_f)) & (band_freqs <= (f0 + delta_f))
+    harm_mask = (band_freqs >= (2 * f0 - delta_f)) & (band_freqs <= (2 * f0 + delta_f))
+    sig_mask = fund_mask | harm_mask
 
-    # SNR in dB
-    snr_db = 10.0 * np.log10(peak_power / (noise_power + 1e-10))
+    P_sig = float(np.sum(band_power[sig_mask]))
+    N_sig = max(1, int(np.sum(sig_mask)))
 
-    # Heart rate from peak frequency
-    band_freqs = freqs[band_mask]
-    peak_freq = band_freqs[np.argmax(band_power)]
-    heart_rate_bpm = peak_freq * 60.0
+    noise_mask = ~sig_mask
+    P_noise = float(np.sum(band_power[noise_mask]))
+    N_noise = max(1, int(np.sum(noise_mask)))
 
-    # Decision: SNR > β (per-candidate threshold from enrollment)
-    is_live = snr_db > snr_threshold_db
+    # Compute average spectral energy density per bin
+    sig_density = P_sig / N_sig
+    noise_density = P_noise / N_noise
 
-    return bool(is_live), float(snr_db), float(heart_rate_bpm)
+    # In-band SNR (dB)
+    snr_db = 10.0 * np.log10(max(sig_density, 1e-10) / max(noise_density, 1e-10))
+
+    # Prominence relative to median in-band noise floor
+    median_noise = float(np.median(band_power[noise_mask])) if np.sum(noise_mask) > 0 else 1e-10
+    prominence = peak_power / max(median_noise, 1e-10)
+
+    # Biological pulse criteria:
+    # 1. In-band SNR >= beta threshold (default 3.0 dB)
+    # 2. Spectral peak prominence >= 6.0 (sharp pulse vs flat/diffuse video noise)
+    # 3. Heart rate within physiological human range [45, 195] BPM
+    is_live = bool(
+        (snr_db >= snr_threshold_db) and
+        (prominence >= 6.0) and
+        (45.0 <= heart_rate_bpm <= 195.0)
+    )
+
+    return is_live, round(float(snr_db), 2), round(float(heart_rate_bpm), 1)
 
 
 class RPPGAnalyzer:
     """
     Stateful rPPG analyzer that accumulates RGB samples over 5-second windows
-    and produces liveness decisions.
+    and produces liveness decisions with exponential moving average (EMA) smoothing.
     """
 
-    def __init__(self, fs: float = 30.0, window_seconds: float = 5.0,
+    def __init__(self, fs: float = 10.0, window_seconds: float = 5.0,
                  snr_threshold_db: float = 3.0):
         self.fs = fs
-        self.window_size = int(fs * window_seconds)  # 150 frames at 30fps
+        self.window_size = int(fs * window_seconds)  # 50 frames at 10fps
         self.snr_threshold_db = snr_threshold_db
         self.rgb_buffer: List[Tuple[float, float, float]] = []
         self.last_result: Optional[dict] = None
@@ -258,8 +316,8 @@ class RPPGAnalyzer:
 
         self.rgb_buffer.append((sR, sG, sB))
 
-        # Need at least window_size samples
-        if len(self.rgb_buffer) < self.window_size:
+        # Need at least 32 samples for filter padlen stability
+        if len(self.rgb_buffer) < min(32, self.window_size):
             return None
 
         # Use sliding window (last window_size samples)
@@ -273,10 +331,20 @@ class RPPGAnalyzer:
             h_filtered, self.fs, self.snr_threshold_db
         )
 
+        # Smooth output with Exponential Moving Average (alpha = 0.25)
+        if self.last_result is not None:
+            prev_snr = self.last_result.get("snr_db", snr_db)
+            prev_hr = self.last_result.get("heart_rate_bpm", heart_rate_bpm)
+            smooth_snr = 0.75 * prev_snr + 0.25 * snr_db
+            smooth_hr = 0.8 * prev_hr + 0.2 * heart_rate_bpm
+        else:
+            smooth_snr = snr_db
+            smooth_hr = heart_rate_bpm
+
         self.last_result = {
             "is_live": is_live,
-            "snr_db": snr_db,
-            "heart_rate_bpm": heart_rate_bpm,
+            "snr_db": round(float(smooth_snr), 2),
+            "heart_rate_bpm": round(float(smooth_hr), 1),
             "samples_in_buffer": len(self.rgb_buffer),
         }
 

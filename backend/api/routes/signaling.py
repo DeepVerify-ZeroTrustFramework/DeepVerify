@@ -50,21 +50,17 @@ async def websocket_signaling(websocket: WebSocket, session_id: str):
 
     print(f"[Signaling] {role} joined room {session_id}")
 
-    # Notify the other party if they're already connected
-    await _send_to_peer(session_id, other_role, {
-        "type": "peer-joined",
-        "role": role,
-    })
-
-    # If both are now in the room, tell both sides
+    # If both peers are now connected, announce room-ready
     room = _rooms.get(session_id, {})
     if "candidate" in room and "interviewer" in room:
-        print(f"[Signaling] Both peers in room {session_id} — sending room-ready")
+        print(f"[Signaling] Both peers present in room {session_id} — sending room-ready")
         for r in ("candidate", "interviewer"):
             await _send_to_peer(session_id, r, {
                 "type": "room-ready",
                 "participants": ["candidate", "interviewer"],
             })
+    else:
+        print(f"[Signaling] {role} waiting for peer in room {session_id}")
 
     # Main message loop
     try:
@@ -84,8 +80,24 @@ async def websocket_signaling(websocket: WebSocket, session_id: str):
             # Relay signaling messages to the other peer
             if msg_type in ("offer", "answer", "ice-candidate", "ready", "bye"):
                 msg["from"] = role
-                print(f"[Signaling] Relaying '{msg_type}' from {role} → {other_role} in {session_id}")
+                if msg_type in ("offer", "answer"):
+                    sdp = msg.get("sdp", "")
+                    m_lines = [l for l in sdp.splitlines() if l.startswith("m=") or l.startswith("a=send") or l.startswith("a=recv") or l.startswith("a=inactive") or l.startswith("a=msid:")]
+                    print(f"[Signaling] Relaying '{msg_type}' from {role} → {other_role} in {session_id}:\n  " + "\n  ".join(m_lines))
+                else:
+                    print(f"[Signaling] Relaying '{msg_type}' from {role} → {other_role} in {session_id}")
                 await _send_to_peer(session_id, other_role, msg)
+
+                # When a peer explicitly signals 'ready', if both are present, re-trigger room-ready
+                if msg_type == "ready":
+                    room = _rooms.get(session_id, {})
+                    if "candidate" in room and "interviewer" in room:
+                        print(f"[Signaling] Both peers ready in {session_id} — triggering room-ready")
+                        for r in ("candidate", "interviewer"):
+                            await _send_to_peer(session_id, r, {
+                                "type": "room-ready",
+                                "participants": ["candidate", "interviewer"],
+                            })
             else:
                 print(f"[Signaling] Unknown message type '{msg_type}' from {role}")
 
@@ -94,25 +106,30 @@ async def websocket_signaling(websocket: WebSocket, session_id: str):
     except Exception as e:
         print(f"[Signaling] Error in {role} handler for {session_id}: {e}")
     finally:
-        # Safe cleanup — never raise KeyError
-        _cleanup_room(session_id, role)
+        # Safe cleanup — only remove if this dying socket is still the active one
+        was_active = _cleanup_room(session_id, role, websocket)
 
-        # Notify remaining peer
-        await _send_to_peer(session_id, other_role, {
-            "type": "peer-left",
-            "role": role,
-        })
+        # Notify remaining peer only if this was the active socket
+        if was_active:
+            print(f"[Signaling] Active {role} departed — notifying {other_role}")
+            await _send_to_peer(session_id, other_role, {
+                "type": "peer-left",
+                "role": role,
+            })
 
 
-def _cleanup_room(session_id: str, role: str):
-    """Safely remove a peer from its room. Never raises."""
+def _cleanup_room(session_id: str, role: str, websocket: WebSocket) -> bool:
+    """Safely remove a peer from its room ONLY if it matches the current socket."""
     room = _rooms.get(session_id)
     if room is None:
-        return
-    room.pop(role, None)
-    if not room:
-        _rooms.pop(session_id, None)
-        print(f"[Signaling] Room {session_id} is empty — removed")
+        return False
+    if room.get(role) == websocket:
+        room.pop(role, None)
+        if not room:
+            _rooms.pop(session_id, None)
+            print(f"[Signaling] Room {session_id} is empty — removed")
+        return True
+    return False
 
 
 async def _send_to_peer(session_id: str, target_role: str, message: dict):

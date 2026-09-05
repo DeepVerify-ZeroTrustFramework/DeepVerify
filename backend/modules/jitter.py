@@ -47,7 +47,7 @@ class JitterAnalyzer:
         # Packet-level tracking
         self.iat_buffer: List[float] = []  # Inter-Arrival Times
         self.last_arrival: Optional[float] = None
-        self.expected_iat: float = 1.0 / 30.0  # Expected ~33ms for 30fps
+        self.expected_iat: float = 1.0 / 10.0  # Expected ~100ms for 10fps frame streaming
         self.running_jitter: float = 0.0
         self.packet_count: int = 0
 
@@ -68,11 +68,13 @@ class JitterAnalyzer:
 
         if self.last_arrival is not None:
             iat = arrival_time - self.last_arrival
-            self.iat_buffer.append(iat)
+            # Filter out gross pauses/reconnects (> 0.4s) to measure true streaming packet variance
+            if 0.01 <= iat <= 0.40:
+                self.iat_buffer.append(iat)
 
-            # RFC 3550 running jitter estimate
-            d = abs(iat - self.expected_iat)
-            self.running_jitter += (d - self.running_jitter) / 16.0
+                # RFC 3550 running jitter estimate
+                d = abs(iat - self.expected_iat)
+                self.running_jitter += (d - self.running_jitter) / 16.0
 
         self.last_arrival = arrival_time
 
@@ -114,7 +116,7 @@ class JitterAnalyzer:
         Returns:
             Dict with cv, skewness, running_jitter_ms, is_synthetic, confidence
         """
-        if len(self.iat_buffer) < 30:
+        if len(self.iat_buffer) < 15:
             return None
 
         # Use last 100 packets for analysis
@@ -124,10 +126,12 @@ class JitterAnalyzer:
         std_iat = np.std(iats)
 
         # Coefficient of Variation
-        cv = std_iat / (mean_iat + 1e-10)
+        raw_cv = std_iat / (mean_iat + 1e-10)
+        cv = 0.0 if (np.isnan(raw_cv) or np.isinf(raw_cv)) else float(raw_cv)
 
         # Skewness — positive skew indicates rendering overhead (occasional long delays)
-        skewness = float(sp_stats.skew(iats))
+        raw_skew = float(sp_stats.skew(iats))
+        skewness = 0.0 if (np.isnan(raw_skew) or np.isinf(raw_skew)) else raw_skew
 
         # Detection decision
         is_synthetic = (cv > self.gamma) and (skewness > 0.5)
@@ -136,11 +140,11 @@ class JitterAnalyzer:
         confidence = min(1.0, cv / (2 * self.gamma)) if is_synthetic else max(0.0, cv / self.gamma)
 
         return {
-            'cv': float(cv),
-            'skewness': skewness,
-            'running_jitter_ms': float(self.running_jitter * 1000),
+            'cv': round(float(cv), 4),
+            'skewness': round(float(skewness), 4),
+            'running_jitter_ms': round(float(self.running_jitter * 1000), 2),
             'is_synthetic': bool(is_synthetic),
-            'confidence': float(confidence),
+            'confidence': round(float(confidence), 3),
             'packets_analyzed': len(iats),
             'gamma_threshold': self.gamma,
             'connection_type': self.connection_type,

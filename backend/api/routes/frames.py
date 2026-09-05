@@ -32,8 +32,8 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None):
         thresholds = thresholds or {}
         _session_analyzers[session_id] = {
             'rppg': RPPGAnalyzer(
-                fs=30.0,
-                window_seconds=5.0,
+                fs=10.0,
+                window_seconds=4.0,
                 snr_threshold_db=thresholds.get('snr_beta', 3.0),
             ),
             'jitter': JitterAnalyzer(
@@ -46,9 +46,12 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None):
             ),
             'last_fusion_time': 0.0,
             'frame_count': 0,
-            'last_pce': 100.0,  # Default to authentic until proven otherwise
-            'last_snr': 5.0,
-            'last_cv': 0.0,
+            'last_pce': 0.0,  # Zero-Trust default: unverified until live calculation passes
+            'last_snr': 0.0,  # Zero-Trust default: unverified until live calculation passes
+            'last_cv': 0.05,
+            'last_hr_bpm': 72.0,
+            'camera_active': True,
+            'last_frame_received_at': time.time(),
         }
     return _session_analyzers[session_id]
 
@@ -93,9 +96,12 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
 
             if 'bytes' in data and data['bytes']:
                 # Binary message: JPEG I-frame
-                await _process_frame(
-                    session_id, data['bytes'], analyzers, K_hat, merged_thresholds
-                )
+                try:
+                    await _process_frame(
+                        session_id, data['bytes'], analyzers, K_hat, merged_thresholds
+                    )
+                except Exception as e:
+                    print(f"[Frames] Error processing frame: {e}")
 
             elif 'text' in data and data['text']:
                 # Text message: JSON behavioral event or gaze data
@@ -105,7 +111,7 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                 except json.JSONDecodeError:
                     pass
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         print(f"[Frames] Session {session_id} disconnected.")
         # Clean up analyzers after disconnect
         if session_id in _session_analyzers:
@@ -121,30 +127,59 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
     if frame is None:
         return
 
-    # Resize to standard dimensions
-    frame = cv2.resize(frame, (640, 480))
+    # Resize to 320x240 (matching PRNU enrollment dimensions)
+    frame = cv2.resize(frame, (320, 240))
     analyzers['frame_count'] += 1
 
-    # --- PRNU Analysis (every 10th frame to reduce CPU load) ---
-    if K_hat is not None and analyzers['frame_count'] % 10 == 0:
-        try:
-            W_test = extract_noise_residual(frame)
-            pce = compute_pce(W_test, K_hat)
-            analyzers['last_pce'] = pce
-        except Exception as e:
-            print(f"[PRNU] Error: {e}")
+    # Ensure K_hat is loaded from memory or disk
+    if K_hat is None:
+        K_hat = get_prnu_reference(session_id)
+
+    analyzers['last_frame_received_at'] = time.time()
+    analyzers['camera_active'] = True
+
+    # --- PRNU Analysis (every 10th frame: 1x per second) ---
+    if analyzers['frame_count'] % 10 == 0:
+        if K_hat is not None:
+            try:
+                W_test = extract_noise_residual(frame)
+                pce = compute_pce(W_test, K_hat)
+                prev_pce = analyzers.get('last_pce', 0.0)
+                if prev_pce > 0.0:
+                    smooth_pce = 0.7 * prev_pce + 0.3 * pce
+                else:
+                    smooth_pce = pce
+                analyzers['last_pce'] = float(smooth_pce)
+            except Exception as e:
+                print(f"[PRNU] Error: {e}")
+                analyzers['last_pce'] = 0.0
+        else:
+            analyzers['last_pce'] = 0.0
 
     # --- rPPG Analysis (every frame) ---
     # Pass empty landmarks since we're doing simplified ROI extraction
     rppg_result = analyzers['rppg'].add_sample(frame, [])
     if rppg_result:
-        analyzers['last_snr'] = rppg_result['snr_db']
+        analyzers['last_snr'] = float(rppg_result['snr_db'])
+        if 'heart_rate_bpm' in rppg_result and rppg_result['heart_rate_bpm'] > 0:
+            analyzers['last_hr_bpm'] = float(rppg_result['heart_rate_bpm'])
 
     # --- Jitter: record frame arrival time ---
     analyzers['jitter'].process_packet_timestamp(time.time())
     jitter_metrics = analyzers['jitter'].compute_detection_metrics()
     if jitter_metrics:
-        analyzers['last_cv'] = jitter_metrics['cv']
+        analyzers['last_cv'] = float(jitter_metrics['cv'])
+
+    # Synchronize into in-memory telemetry so behavioral events don't overwrite real forensic scores
+    try:
+        from api.routes.ws_handlers import _get_telemetry
+        telemetry = _get_telemetry(session_id)
+        telemetry["last_pce"] = analyzers['last_pce']
+        telemetry["last_snr_rppg"] = analyzers['last_snr']
+        telemetry["last_cv_jitter"] = analyzers['last_cv']
+        telemetry["last_hr_bpm"] = analyzers.get('last_hr_bpm', 72.0)
+    except Exception:
+        pass
 
     # --- Axiom Fusion (every ~3 seconds) ---
     now = time.time()
@@ -158,7 +193,26 @@ async def _process_event(session_id: str, msg: dict, analyzers: dict):
     event_type = msg.get('type', '')
     behavioral = analyzers['behavioral']
 
-    if event_type in ('TAB_SWITCH', 'WINDOW_BLUR', 'LARGE_PASTE'):
+    if event_type == 'CAMERA_STATUS':
+        camera_enabled = bool(msg.get('enabled', False))
+        analyzers['camera_active'] = camera_enabled
+        if not camera_enabled:
+            analyzers['last_pce'] = 0.0
+            analyzers['last_snr'] = -10.0
+            analyzers['last_cv'] = 0.0
+            try:
+                from api.routes.ws_handlers import _get_telemetry
+                telemetry = _get_telemetry(session_id)
+                telemetry['camera_active'] = False
+                telemetry['last_pce'] = 0.0
+                telemetry['last_snr_rppg'] = -10.0
+                telemetry['last_cv_jitter'] = 0.0
+                telemetry['face_count'] = 0
+            except Exception:
+                pass
+        await _run_fusion(session_id, analyzers, {})
+
+    elif event_type in ('TAB_SWITCH', 'WINDOW_BLUR', 'LARGE_PASTE'):
         behavioral.record_event(event_type, metadata=msg.get('metadata', {}))
 
         # Store event in MongoDB
@@ -192,6 +246,20 @@ async def _process_event(session_id: str, msg: dict, analyzers: dict):
 async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
     """Run axiom fusion engine and publish results."""
     behavioral_score = analyzers['behavioral'].compute_score()
+    try:
+        from api.routes.ws_handlers import _get_telemetry
+        telemetry = _get_telemetry(session_id)
+        if telemetry.get("gaze_deltas"):
+            from modules.behavioral import compute_behavioral_score
+            behavioral_score = compute_behavioral_score(telemetry, {
+                "lambda_gaze": thresholds.get("behavioral_lambda", 0.25),
+            })
+    except Exception:
+        pass
+
+    is_cam_active = analyzers.get('camera_active', True)
+    if time.time() - analyzers.get('last_frame_received_at', time.time()) > 3.0:
+        is_cam_active = False
 
     result = axiom_fusion_engine(
         pce=analyzers['last_pce'],
@@ -199,26 +267,37 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
         cv_jitter=analyzers['last_cv'],
         behavioral_score=behavioral_score,
         thresholds={
-            'pce_threshold': thresholds.get('pce_threshold', 60.0),
-            'snr_threshold_db': thresholds.get('snr_beta', 3.0),
+            'pce_tau': thresholds.get('pce_threshold', 6.0),
+            'snr_beta': thresholds.get('snr_beta', 2.0),
             'jitter_gamma': thresholds.get('jitter_gamma', 0.15),
-        }
+        },
+        camera_active=is_cam_active,
     )
 
+    now_iso = datetime.utcnow().isoformat()
     # Add metadata
+    result['type'] = 'TRUST_UPDATE'
     result['session_id'] = session_id
-    result['timestamp'] = datetime.utcnow().isoformat()
+    result['timestamp'] = now_iso
     result['pce'] = analyzers['last_pce']
     result['snr_rppg'] = analyzers['last_snr']
     result['cv_jitter'] = analyzers['last_cv']
     result['behavioral_score'] = behavioral_score
     result['stats'] = analyzers['behavioral'].get_stats()
+    result['raw'] = {
+        'pce': float(analyzers['last_pce']),
+        'snr_rppg': float(analyzers['last_snr']),
+        'cv_jitter': float(analyzers['last_cv']),
+        'behavioral_score': float(behavioral_score),
+        'hr_bpm': float(analyzers.get('last_hr_bpm', 72.0)),
+    }
 
     # Publish to Redis for dashboard consumption
     await publish_trust_score(session_id, result)
 
     # Publish individual alerts
     for alert in result.get('alerts', []):
+        alert['type'] = 'ALERT'
         await publish_alert(session_id, alert)
 
         # Store alert in MongoDB
@@ -239,4 +318,5 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
         'cv_jitter': analyzers['last_cv'],
         'behavioral_score': behavioral_score,
         'breakdown': result['breakdown'],
+        'raw': result['raw'],
     })

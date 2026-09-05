@@ -113,28 +113,38 @@ def compute_pce(W_test: np.ndarray, K_hat: np.ndarray) -> float:
         PCE value as float. Higher = more likely authentic.
     """
     # Use green channel — highest PRNU SNR due to Bayer filter
-    w = W_test[:, :, 1].flatten().astype(np.float64)
-    k = K_hat[:, :, 1].flatten().astype(np.float64)
+    w = W_test[:, :, 1].astype(np.float64)
+    k = K_hat[:, :, 1].astype(np.float64)
 
-    # Ensure same length
-    min_len = min(len(w), len(k))
-    w = w[:min_len]
-    k = k[:min_len]
+    # Ensure matching 2D dimensions
+    h = min(w.shape[0], k.shape[0])
+    w_width = min(w.shape[1], k.shape[1])
+    w = w[:h, :w_width]
+    k = k[:h, :w_width]
 
-    # Normalized cross-correlation via FFT (much faster than spatial domain)
-    F_w = np.fft.fft(w)
-    F_k = np.fft.fft(k)
-    cross_corr = np.fft.ifft(F_w * np.conj(F_k)).real
+    # Zero-mean normalize both before correlation for maximum SNR
+    w = w - np.mean(w)
+    k = k - np.mean(k)
 
-    # PCE = peak² / mean(all other values²)
+    # 2D cross-correlation via 2D FFT (preserves 2D sensor pixel geometry)
+    F_w = np.fft.fft2(w)
+    F_k = np.fft.fft2(k)
+    cross_corr = np.fft.ifft2(F_w * np.conj(F_k)).real
+
+    # PCE = peak² / mean(energy outside 11x11 peak neighborhood)
     corr_sq = cross_corr ** 2
-    peak_idx = np.argmax(corr_sq)
-    peak = corr_sq[peak_idx]
+    peak_idx = np.unravel_index(np.argmax(corr_sq), corr_sq.shape)
+    peak = float(corr_sq[peak_idx])
 
-    # Remove peak from energy calculation
+    # Standard Lukas & Fridrich PCE: zero out 11x11 neighborhood around peak
+    r, c = peak_idx
     mask = corr_sq.copy()
-    mask[peak_idx] = 0
-    energy_rest = np.mean(mask)
+    r_min, r_max = max(0, r - 5), min(h, r + 6)
+    c_min, c_max = max(0, c - 5), min(w_width, c + 6)
+    mask[r_min:r_max, c_min:c_max] = 0.0
+
+    valid_energy = mask[mask > 0]
+    energy_rest = float(np.mean(valid_energy)) if len(valid_energy) > 0 else 1e-10
 
     pce = peak / (energy_rest + 1e-10)
     return float(pce)

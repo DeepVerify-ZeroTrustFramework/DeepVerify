@@ -62,7 +62,7 @@ export const GazeCapturer: React.FC<GazeCapturerProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const lastCallbackTime = useRef(0)
-  const animFrameRef = useRef<number | null>(null)
+  const isProcessingRef = useRef(false)
   const faceMeshRef = useRef<any>(null)
   const [, setMediaPipeReady] = useState(false)
   const absenceStartRef = useRef<number | null>(null)
@@ -286,47 +286,49 @@ export const GazeCapturer: React.FC<GazeCapturerProps> = ({
     }
   }, [])
 
-  // Process video frame loop
+  // Process video frame loop throttled with mutex
   const processFrame = useCallback(async () => {
     if (!enabled || !videoRef.current || !canvasRef.current) {
-      animFrameRef.current = requestAnimationFrame(() => processFrame())
       return
     }
 
+    if (isProcessingRef.current) return
+
     const now = Date.now()
-    if (now - lastCallbackTime.current < 400) {
-      animFrameRef.current = requestAnimationFrame(processFrame)
+    if (now - lastCallbackTime.current < 200) {
       return
     }
 
     const video = videoRef.current
     if (video.readyState < 2) {
-      animFrameRef.current = requestAnimationFrame(processFrame)
       return
     }
 
-    if (faceMeshRef.current) {
-      try {
+    isProcessingRef.current = true
+    try {
+      if (faceMeshRef.current) {
         await faceMeshRef.current.send({ image: video })
-      } catch (e) {
-        // Skip on temporary mesh error
+      } else {
+        const gazeData = computeFallbackGaze()
+        if (gazeData && onGazeData) {
+          onGazeData(gazeData)
+          lastCallbackTime.current = now
+        }
       }
-    } else {
-      const gazeData = computeFallbackGaze()
-      if (gazeData && onGazeData) {
-        onGazeData(gazeData)
-        lastCallbackTime.current = now
-      }
+    } catch (e) {
+      // Skip on temporary mesh error
+    } finally {
+      isProcessingRef.current = false
     }
-
-    animFrameRef.current = requestAnimationFrame(() => processFrame())
   }, [enabled, onGazeData, computeFallbackGaze])
 
-  // Initialize video from stream
+  // Initialize video from stream (guarded to prevent flicker)
   useEffect(() => {
     if (!stream || !videoRef.current) return
-    videoRef.current.srcObject = stream
-    videoRef.current.play().catch(console.error)
+    if (videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream
+      videoRef.current.play().catch(console.error)
+    }
   }, [stream])
 
   // Start processing loop & load FaceMesh
@@ -406,10 +408,14 @@ export const GazeCapturer: React.FC<GazeCapturerProps> = ({
     }
 
     loadFaceMesh()
-    animFrameRef.current = requestAnimationFrame(processFrame)
+
+    // Steady 5 FPS execution avoids UI thread starvation and video lag
+    const interval = setInterval(() => {
+      processFrame()
+    }, 200)
 
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      clearInterval(interval)
     }
   }, [enabled, processFrame, computeGaze, onGazeData])
 

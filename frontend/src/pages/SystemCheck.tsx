@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
-  ShieldCheck, Loader2, Camera, AlertCircle, Wifi, Cpu, 
+  ShieldCheck, Loader2, Camera, AlertCircle, AlertTriangle, RefreshCw, Wifi, Cpu, 
   HeartPulse, Eye, FileText, CheckCircle2, Volume2, VolumeX, Monitor,
   UploadCloud, UserCheck
 } from 'lucide-react'
@@ -55,7 +55,8 @@ export default function SystemCheck() {
 
 function SystemCheckWizard({ session }: { session: any }) {
   const { 
-    currentStep, nextStep, stream, deviceName, virtualError, demoMode,
+    currentStep, nextStep, stream, deviceName, virtualError, hardwareError,
+    availableCameras, selectedCameraId, hasAudio,
     rtt, connType, prnuFrames, rppgBpm, gazeLambda,
     referencePhotoUrl, photoUploading, photoError, isPhotoValidated,
     actions
@@ -103,8 +104,10 @@ function SystemCheckWizard({ session }: { session: any }) {
   useEffect(() => {
     if (virtualError) {
       speak(virtualError)
+    } else if (hardwareError) {
+      speak(hardwareError.message)
     }
-  }, [virtualError, speak])
+  }, [virtualError, hardwareError, speak])
 
   // Read out network measurement results when ready in Step 2
   useEffect(() => {
@@ -129,9 +132,13 @@ function SystemCheckWizard({ session }: { session: any }) {
     let ok = false
 
     if (currentStep === 1) {
-      ok = await actions.requestPermissions()
-      if (ok) {
-        speak("Camera verified.")
+      if (!stream) {
+        ok = await actions.requestPermissions()
+        if (ok) {
+          speak("Physical camera verified.")
+        }
+      } else {
+        ok = true
       }
     }
 
@@ -245,19 +252,6 @@ function SystemCheckWizard({ session }: { session: any }) {
             <span>{isMuted ? 'Muted' : 'Voice on'}</span>
           </button>
 
-          {/* Demo Mode Toggle */}
-          <button
-            onClick={() => actions.toggleDemoMode()}
-            title={demoMode ? "Demo Mode Active: Virtual camera bypass enabled" : "Enable Demo Mode (Simulate Attacker)"}
-            className={`px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 text-xs font-semibold ${
-              demoMode 
-                ? 'bg-amber-100 text-amber-900 border-amber-300 shadow-sm' 
-                : 'bg-white text-gray-500 border-[#E4E4E6] hover:bg-[#F7F7F8]'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${demoMode ? 'bg-amber-500 animate-pulse' : 'bg-gray-400'}`} />
-            <span>{demoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'}</span>
-          </button>
 
           <div className="text-[13px] font-medium text-[#6B6B6B] border-l border-[#E4E4E6] pl-4">
             Candidate: {session.candidate_name}
@@ -287,54 +281,151 @@ function SystemCheckWizard({ session }: { session: any }) {
             
             {/* Step 1: Permissions */}
             {currentStep === 1 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-[#F9ECF0] flex items-center justify-center mb-6">
-                  <Camera className="text-[#A4123F]" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-[#F9ECF0] flex items-center justify-center">
+                    <Camera className="text-[#A4123F]" />
+                  </div>
+                  {stream && !virtualError && !hardwareError && (
+                    <span className="px-3 py-1 rounded-full bg-emerald-50 text-[#137333] text-xs font-semibold flex items-center gap-1.5 border border-[#B7E1CD]">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Hardware Ready
+                    </span>
+                  )}
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">Camera & Hardware Access</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+
+                <h2 className="text-xl font-bold text-[#0F0F0F] mb-2">Camera & Hardware Access</h2>
+                <p className="text-[14px] text-[#6B6B6B] mb-5 leading-relaxed">
                   DeepVerify requires raw access to your physical camera to generate cryptographic hardware fingerprints. Virtual cameras (OBS, Snap Camera, etc.) are strictly prohibited.
                 </p>
+
+                {/* 1. Hardware Access & Permissions Troubleshooting Card */}
+                {hardwareError && (
+                  <div className="p-4 mb-5 rounded-xl bg-[#FFF5F5] border border-[#FED7D7] text-[#9B2C2C] text-[13px] flex flex-col gap-3 shadow-sm">
+                    <div className="flex gap-2.5 items-start">
+                      <AlertTriangle size={18} className="shrink-0 text-amber-600 mt-0.5" />
+                      <div className="flex-1">
+                        <strong className="text-[#9B2C2C] block font-bold text-[14px] mb-1">
+                          {hardwareError.title}
+                        </strong>
+                        <p className="text-[#742A2A] leading-relaxed mb-3">
+                          {hardwareError.message}
+                        </p>
+                        <div className="p-3 bg-white/90 rounded-lg border border-[#FEB2B2] text-[12px] text-[#4A5568]">
+                          <strong className="block text-[#2D3748] mb-1 font-semibold">Troubleshooting Steps:</strong>
+                          <div className="whitespace-pre-line leading-relaxed font-sans">
+                            {hardwareError.suggestion}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#FEB2B2]/60 flex items-center justify-between">
+                      <span className="text-[11px] text-[#742A2A] font-medium">
+                        Status: Hardware release / permission required
+                      </span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setStepLoading(true)
+                          await actions.requestPermissions()
+                          setStepLoading(false)
+                        }}
+                        className="px-3 py-1.5 bg-[#9B2C2C] text-white hover:bg-[#742A2A] rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RefreshCw size={12} className={stepLoading ? 'animate-spin' : ''} />
+                        Retry Access
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Genuine Virtual Camera Security Block */}
                 {virtualError && (
-                  <div className="p-4 mb-6 rounded-xl bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex flex-col gap-3">
+                  <div className="p-4 mb-5 rounded-xl bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex flex-col gap-3">
                     <div className="flex gap-2 items-start">
                       <AlertCircle size={16} className="shrink-0 mt-0.5" /> 
                       <div>
                         <strong>Security Block:</strong> {virtualError}
                       </div>
                     </div>
-                    <div className="pt-2 border-t border-[#FCA5A5]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <span className="text-[12px] text-[#7F1D1D] font-medium">
-                        Presenting to the panel? Simulate an attacker with masked drivers:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await actions.bypassVirtualCheck()
-                          nextStep()
+                  </div>
+                )}
+
+                {/* 4. Live Stream Hardware Preview & Verification */}
+                {stream && !virtualError && !hardwareError && (
+                  <div className="mb-5 animate-fade-in">
+                    <div className="w-full aspect-video rounded-xl overflow-hidden bg-[#0A0A0A] relative shadow-inner border border-[#E4E4E6] mb-3">
+                      <video
+                        autoPlay
+                        playsInline
+                        muted
+                        ref={(el) => {
+                          if (el && stream) el.srcObject = stream
                         }}
-                        className="px-3 py-1.5 bg-[#991B1B] text-white hover:bg-[#7F1D1D] rounded-lg text-xs font-bold transition-all shadow-sm w-fit cursor-pointer"
-                      >
-                        Bypass Check & Proceed &rarr;
-                      </button>
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                      <div className="absolute top-2.5 left-2.5 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>Live Physical Camera Feed</span>
+                      </div>
+                      {hasAudio && (
+                        <div className="absolute top-2.5 right-2.5 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+                          <Volume2 size={12} className="text-emerald-400" />
+                          <span>Mic Active</span>
+                        </div>
+                      )}
                     </div>
+
+                    <div className="p-3 rounded-xl bg-[#E6F4ED] border border-[#B7E1CD] text-[#137333] text-[12px] flex items-center justify-between">
+                      <div className="flex items-center gap-2 truncate">
+                        <CheckCircle2 size={16} className="shrink-0 text-[#137333]" />
+                        <span className="font-semibold shrink-0">Authentic Hardware Verified:</span>
+                        <span className="font-mono text-[11px] truncate">{deviceName}</span>
+                      </div>
+                    </div>
+
+                    {availableCameras.length > 1 && (
+                      <div className="mt-2.5 flex items-center justify-between text-xs text-[#6B6B6B] px-1">
+                        <span>Select Camera Device:</span>
+                        <select
+                          value={selectedCameraId}
+                          onChange={(e) => actions.switchCamera(e.target.value)}
+                          className="px-2.5 py-1 bg-white border border-[#E4E4E6] rounded-lg text-xs font-medium text-[#0F0F0F] outline-none hover:border-[#A4123F] transition-colors"
+                        >
+                          {availableCameras.map(cam => (
+                            <option key={cam.deviceId} value={cam.deviceId}>
+                              {cam.label || `Camera ${cam.deviceId.slice(0, 6)}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
-                {demoMode && !virtualError && (
-                  <div className="p-3 mb-6 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2 items-center">
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
-                    <span><strong>Demo Mode Active:</strong> Virtual cameras permitted to demonstrate PRNU &amp; rPPG forensic detection.</span>
-                  </div>
-                )}
+
                 {typeof window !== 'undefined' && Boolean((window.screen as any)?.isExtended) && (
-                  <div className="p-3 mb-6 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2">
+                  <div className="p-3 mb-5 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2">
                     <Monitor size={16} className="shrink-0 mt-0.5" />
                     <span><strong>Advisory:</strong> Multiple monitors detected. Please disconnect secondary displays for an optimal integrity score.</span>
                   </div>
                 )}
-                <div className="mt-auto">
-                  <button onClick={handleStep} disabled={stepLoading} className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
-                    {stepLoading ? <Loader2 size={16} className="animate-spin" /> : 'Grant Permissions'}
+
+                <div className="mt-auto pt-2">
+                  <button
+                    onClick={handleStep}
+                    disabled={stepLoading}
+                    className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    {stepLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : stream ? (
+                      'Continue to Network Check →'
+                    ) : hardwareError ? (
+                      'Retry Permissions'
+                    ) : (
+                      'Grant Permissions'
+                    )}
                   </button>
                 </div>
               </div>

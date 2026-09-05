@@ -13,3 +13,7 @@ env/
 
 # Local overrides
 docker-compose.override.yml
+
+# Runtime session uploads
+backend/uploads/
+*.npy

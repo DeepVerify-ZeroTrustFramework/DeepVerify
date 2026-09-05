@@ -1,27 +1,28 @@
 import type { TrustBreakdown } from '../hooks/useTrustScore'
 import { Cpu, HeartPulse, Activity, Eye } from 'lucide-react'
 
-export default function ModuleBreakdown({ breakdown }: { breakdown: TrustBreakdown }) {
+export default function ModuleBreakdown({ breakdown }: { breakdown?: TrustBreakdown }) {
   const getStatusColor = (val: number, max: number) => {
-    const ratio = val / max
+    const ratio = (val ?? 0) / (max || 1)
     if (ratio >= 0.8) return '#1A6B3C' // Green
     if (ratio >= 0.6) return '#92400E' // Amber
     return '#991B1B' // Red
   }
 
   const modules = [
-    { key: 'prnu', icon: Cpu, label: 'PRNU Identity', val: breakdown.prnu, max: 30 },
-    { key: 'rppg', icon: HeartPulse, label: 'rPPG Liveness', val: breakdown.rppg, max: 30 },
-    { key: 'behavioral', icon: Eye, label: 'Behavioral', val: breakdown.behavioral, max: 25 },
-    { key: 'jitter', icon: Activity, label: 'Jitter Check', val: breakdown.jitter, max: 15 },
+    { key: 'prnu', icon: Cpu, label: 'PRNU Identity', val: breakdown?.prnu ?? 0, max: 30 },
+    { key: 'rppg', icon: HeartPulse, label: 'rPPG Liveness', val: breakdown?.rppg ?? 0, max: 30 },
+    { key: 'behavioral', icon: Eye, label: 'Behavioral', val: breakdown?.behavioral ?? 0, max: 25 },
+    { key: 'jitter', icon: Activity, label: 'Jitter Check', val: breakdown?.jitter ?? 0, max: 15 },
   ]
 
   return (
     <div className="space-y-4">
       {modules.map((m) => {
         const Icon = m.icon
-        const color = getStatusColor(m.val, m.max)
-        const width = `${(m.val / m.max) * 100}%`
+        const val = typeof m.val === 'number' && !isNaN(m.val) ? m.val : 0
+        const color = getStatusColor(val, m.max)
+        const width = `${Math.min(100, Math.max(0, (val / m.max) * 100))}%`
 
         return (
           <div key={m.key} className="flex items-center gap-3">
@@ -32,7 +33,7 @@ export default function ModuleBreakdown({ breakdown }: { breakdown: TrustBreakdo
               <div className="flex justify-between items-end mb-1">
                 <span className="text-[12px] font-semibold text-[#3A3A3A]">{m.label}</span>
                 <span className="text-[11px] font-mono text-[#6B6B6B]">
-                  {m.val.toFixed(1)} <span className="text-[9px]">/ {m.max}</span>
+                  {val.toFixed(1)} <span className="text-[9px]">/ {m.max}</span>
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-[#EFEFF0] overflow-hidden">

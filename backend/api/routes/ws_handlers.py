@@ -35,11 +35,12 @@ def _get_telemetry(session_id: str) -> dict:
             "prohibited_objects_5min": 0,
             "absences_5min": 0,
             "multi_monitors_5min": 0,
-            "last_pce": 80.0,
-            "last_snr_rppg": 7.0,
+            "last_pce": 0.0,
+            "last_snr_rppg": 0.0,
             "last_cv_jitter": 0.05,
             "last_hr_bpm": 72.0,
             "face_count": 1,
+            "camera_active": True,
             "_gaze_alert_cooldown": 0,
             "_multiface_alert_cooldown": 0,
             "_absence_alert_cooldown": 0,
@@ -394,15 +395,19 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 }
                 await _push_to_dashboard(session_id, alert_msg)
 
+            elif msg_type in ("CAMERA_STATUS", "MEDIA_STATUS"):
+                cam_active = bool(msg.get("enabled", msg.get("video_enabled", True)))
+                telemetry["camera_active"] = cam_active
+                if not cam_active:
+                    telemetry["last_pce"] = 0.0
+                    telemetry["last_snr_rppg"] = -10.0
+                    telemetry["last_cv_jitter"] = 0.0
+                    telemetry["face_count"] = 0
+
             elif msg_type == "FRAME_METRICS":
-                if "pce" in msg:
-                    telemetry["last_pce"] = msg["pce"]
-                if "snr_rppg" in msg:
-                    telemetry["last_snr_rppg"] = msg["snr_rppg"]
-                if "cv_jitter" in msg:
-                    telemetry["last_cv_jitter"] = msg["cv_jitter"]
-                if "hr_bpm" in msg:
-                    telemetry["last_hr_bpm"] = msg["hr_bpm"]
+                # Forensic metrics (PCE, rPPG SNR, Jitter) MUST be calculated server-side
+                # from actual ingested video frames in frames.py. Disallow client self-reporting.
+                pass
 
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -422,6 +427,7 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 cv_jitter=telemetry["last_cv_jitter"],
                 behavioral_score=behavioral_score,
                 thresholds=thresholds,
+                camera_active=telemetry.get("camera_active", True),
             )
 
             trust_update = {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { 
-  ShieldCheck, Loader2, Code2, AlertCircle, Clock, AlertTriangle, 
-  Monitor, Users, Smartphone, Maximize2, Minimize2, Camera, 
-  CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home
+import {
+  ShieldCheck, Loader2, Code2, AlertCircle, Clock, AlertTriangle,
+  Monitor, Users, Smartphone, Maximize2, Minimize2, Camera,
+  CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home,
+  Mic, MicOff, Video, VideoOff, Eye, EyeOff
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
@@ -76,7 +77,6 @@ export default function CandidateSession() {
 
   // Telemetry indicators
   const [gazeDelta, setGazeDelta] = useState(0)
-  const [hr, setHr] = useState(72)
   const [faceCount, setFaceCount] = useState(1)
   const [detectedItem, setDetectedItem] = useState<string | null>(null)
   const [reflectionAlert, setReflectionAlert] = useState(false)
@@ -104,8 +104,58 @@ export default function CandidateSession() {
   const [isEnded, setIsEnded] = useState(false)
   const [endingSession, setEndingSession] = useState(false)
 
+  const frameWsRef = useRef<WebSocket | null>(null)
+  const frameIntervalRef = useRef<any>(null)
+
+  // Candidate local media controls
+  const [camEnabled, setCamEnabled] = useState(true)
+  const [micEnabled, setMicEnabled] = useState(true)
+  const [selfViewHidden, setSelfViewHidden] = useState(false)
+  const camEnabledRef = useRef(true)
+  const telemetryRef = useRef<any>(null)
+
+  const toggleCandidateCam = useCallback(() => {
+    if (!localStream) return
+    const next = !camEnabled
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = next
+    })
+    setCamEnabled(next)
+    camEnabledRef.current = next
+
+    // Instantly notify backend frames socket
+    if (frameWsRef.current && frameWsRef.current.readyState === WebSocket.OPEN) {
+      frameWsRef.current.send(JSON.stringify({ type: 'CAMERA_STATUS', enabled: next }))
+    }
+    // Instantly notify telemetry socket
+    telemetryRef.current?.sendEvent('CAMERA_STATUS', { enabled: next, video_enabled: next })
+  }, [localStream, camEnabled])
+
+  const toggleCandidateMic = useCallback(() => {
+    if (!localStream) return
+    const next = !micEnabled
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = next
+    })
+    setMicEnabled(next)
+  }, [localStream, micEnabled])
+
+  // Instant exit teardown
   const handleEndInterview = async () => {
     setEndingSession(true)
+    if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+    if (frameWsRef.current) {
+      try { frameWsRef.current.close() } catch {}
+      frameWsRef.current = null
+    }
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (localStream) {
+      localStream.getTracks().forEach((t) => t.stop())
+    }
+    rtc.stop()
+    setShowEndModal(false)
+    setIsEnded(true)
+
     try {
       if (session?.session_id) {
         await fetch(`/api/sessions/${session.session_id}`, {
@@ -117,13 +167,7 @@ export default function CandidateSession() {
     } catch (e) {
       console.warn('Failed to mark session completed', e)
     } finally {
-      if (localStream) {
-        localStream.getTracks().forEach((t) => t.stop())
-      }
-      rtc.stop()
       setEndingSession(false)
-      setShowEndModal(false)
-      setIsEnded(true)
     }
   }
 
@@ -178,8 +222,13 @@ export default function CandidateSession() {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
           setLocalStream(stream)
-        } catch (e) {
-          setError('Camera access is required. Please check permissions.')
+        } catch (e1) {
+          try {
+            const videoOnly = await navigator.mediaDevices.getUserMedia({ video: true })
+            setLocalStream(videoOnly)
+          } catch (e2) {
+            setError('Camera access is required. Please check permissions.')
+          }
         }
       } catch (err) {
         setError('Invalid or expired session link.')
@@ -208,16 +257,84 @@ export default function CandidateSession() {
     }
   }, [session])
 
+  // ── Real-Time Video Frame Streaming to Backend (/ws/frames/{sessionId}) ──
+  useEffect(() => {
+    if (!session?.session_id || !localStream) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${protocol}//${window.location.host}/ws/frames/${session.session_id}`
+    const frameWs = new WebSocket(wsUrl)
+    frameWsRef.current = frameWs
+    frameWs.binaryType = 'arraybuffer'
+
+    frameWs.onopen = () => {
+      console.log('[Frames WS] Connected for real-time PRNU & rPPG forensic analysis')
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 320
+      canvas.height = 240
+      const ctx = canvas.getContext('2d')
+
+      // 100ms interval = 10 FPS
+      const frameInterval = setInterval(() => {
+        if (!camEnabledRef.current) return // Do NOT capture or transmit frames when camera is disabled
+        if (!frameWs || frameWs.readyState !== WebSocket.OPEN) return
+        const video = selfVideoRef.current
+        if (!video || video.readyState < 2) return
+
+        try {
+          ctx?.drawImage(video, 0, 0, 320, 240)
+          canvas.toBlob(
+            (blob) => {
+              if (blob && frameWs && frameWs.readyState === WebSocket.OPEN && camEnabledRef.current) {
+                blob.arrayBuffer().then((buffer) => {
+                  if (frameWs && frameWs.readyState === WebSocket.OPEN && camEnabledRef.current) {
+                    frameWs.send(buffer)
+                  }
+                })
+              }
+            },
+            'image/jpeg',
+            0.85
+          )
+        } catch {
+          // Ignore drawing glitches
+        }
+      }, 100)
+      frameIntervalRef.current = frameInterval
+    }
+
+    frameWs.onerror = (err) => {
+      console.warn('[Frames WS] Error:', err)
+    }
+
+    frameWs.onclose = () => {
+      console.log('[Frames WS] Disconnected')
+      if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+    }
+
+    return () => {
+      if (frameIntervalRef.current) {
+        clearInterval(frameIntervalRef.current)
+        frameIntervalRef.current = null
+      }
+      if (frameWsRef.current) {
+        frameWsRef.current.close()
+        frameWsRef.current = null
+      }
+    }
+  }, [session?.session_id, localStream])
+
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {})
+      document.documentElement.requestFullscreen().catch(() => { })
       setIsFullscreen(true)
     } else {
       if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {})
+        document.exitFullscreen().catch(() => { })
       }
       setIsFullscreen(false)
     }
@@ -253,6 +370,10 @@ export default function CandidateSession() {
   })
 
   useEffect(() => {
+    telemetryRef.current = telemetry
+  }, [telemetry])
+
+  useEffect(() => {
     if (session && localStream) {
       rtc.initialize()
     }
@@ -267,6 +388,8 @@ export default function CandidateSession() {
   // Handle REAL gaze and multi-face telemetry from GazeCapturer
   const handleGaze = useCallback(
     (data: GazeData) => {
+      if (!camEnabledRef.current) return
+
       setGazeDelta(data.delta)
       setFaceCount(data.faceCount)
       setReflectionAlert(data.screenReflection.detected)
@@ -288,16 +411,8 @@ export default function CandidateSession() {
         screenReflection: data.screenReflection,
       })
 
-      // Frame metrics degradation based on real suspicion
+      // Real behavioral metrics sent to backend
       const s = suspicionRef.current
-      const pce = Math.max(20, 85 - s.tabSwitches * 8 + Math.random() * 3)
-      const snr = Math.max(-2, 8 - (s.blurTime / 10000) * 3 - s.tabSwitches * 0.5 + Math.random())
-      const cv = Math.min(0.5, 0.04 + s.tabSwitches * 0.03 + s.pastes * 0.04 + Math.random() * 0.01)
-      const newHr = Math.round(72 + Math.sin(Date.now() / 1000) * 5 + s.tabSwitches * 2)
-      setHr(newHr)
-
-      telemetry.sendFrameMetrics({ pce, snr_rppg: snr, cv_jitter: cv, hr_bpm: newHr })
-
       // Decay suspicion counters
       if (s.tabSwitches > 0 && Math.random() < 0.05) s.tabSwitches = Math.max(0, s.tabSwitches - 1)
       if (s.blurTime > 0 && Math.random() < 0.1) s.blurTime = Math.max(0, s.blurTime - 1000)
@@ -580,7 +695,9 @@ export default function CandidateSession() {
                 autoPlay
                 playsInline
                 ref={(v) => {
-                  if (v && v.srcObject !== rtc.remoteStream) v.srcObject = rtc.remoteStream
+                  if (v && v.srcObject !== rtc.remoteStream) {
+                    v.srcObject = rtc.remoteStream
+                  }
                 }}
                 className="w-full h-full object-cover"
               />
@@ -593,53 +710,98 @@ export default function CandidateSession() {
               </div>
             )}
 
-            {/* Self view PiP */}
-            <div className="absolute bottom-6 right-6 w-48 aspect-video bg-black rounded-lg border border-gray-700 overflow-hidden shadow-2xl">
-              {localStream && (
-                <>
-                  <video
-                    autoPlay
-                    playsInline
-                    muted
-                    ref={(v) => {
-                      selfVideoRef.current = v
-                      if (v) v.srcObject = localStream
-                    }}
-                    className="w-full h-full object-cover scale-x-[-1]"
-                  />
-                  {/* Real-time Gaze, Multi-Face, and Reflection tracking */}
-                  <GazeCapturer stream={localStream} onGazeData={handleGaze} />
+            {/* Self view PiP & Candidate Toolbar */}
+            <div className="absolute bottom-6 right-6 flex flex-col items-end gap-2">
+              {!selfViewHidden && (
+                <div className="w-48 aspect-video bg-black rounded-lg border border-gray-700 overflow-hidden shadow-2xl relative">
+                  {localStream && (
+                    <>
+                      {camEnabled ? (
+                        <video
+                          autoPlay
+                          playsInline
+                          muted
+                          ref={(v) => {
+                            selfVideoRef.current = v
+                            if (v && v.srcObject !== localStream) v.srcObject = localStream
+                          }}
+                          className="w-full h-full object-cover scale-x-[-1]"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-gray-400 text-[10px] gap-1">
+                          <VideoOff size={16} className="text-red-400" />
+                          <span>Camera Off</span>
+                        </div>
+                      )}
+                      {/* Real-time Gaze, Multi-Face, and Reflection tracking */}
+                      <GazeCapturer stream={localStream} onGazeData={handleGaze} />
 
-                  {/* Real-time Prohibited Object Detection */}
-                  <ObjectDetector
-                    stream={localStream}
-                    onObjectDetected={handleObjectDetected}
-                    onObjectCleared={handleObjectCleared}
-                  />
-                </>
+                      {/* Real-time Prohibited Object Detection */}
+                      <ObjectDetector
+                        stream={localStream}
+                        onObjectDetected={handleObjectDetected}
+                        onObjectCleared={handleObjectCleared}
+                      />
+                    </>
+                  )}
+
+                  {/* Status badges on PiP */}
+                  {faceVerified ? (
+                    <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
+                      <CheckCircle2 size={9} /> ID VERIFIED
+                    </div>
+                  ) : (
+                    <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
+                      <Lock size={9} /> UNVERIFIED
+                    </div>
+                  )}
+
+                  {faceCount !== 1 && (
+                    <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-red-600/90 text-white text-[9px] font-bold flex items-center gap-1">
+                      <Users size={10} /> {faceCount === 0 ? 'NO FACE' : `${faceCount} FACES`}
+                    </div>
+                  )}
+                  {detectedItem && (
+                    <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1">
+                      <Smartphone size={10} /> {detectedItem.toUpperCase()}
+                    </div>
+                  )}
+                </div>
               )}
 
-              {/* Status badges on PiP */}
-              {faceVerified ? (
-                <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
-                  <CheckCircle2 size={9} /> ID VERIFIED
-                </div>
-              ) : (
-                <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
-                  <Lock size={9} /> UNVERIFIED
-                </div>
-              )}
-
-              {faceCount !== 1 && (
-                <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-red-600/90 text-white text-[9px] font-bold flex items-center gap-1">
-                  <Users size={10} /> {faceCount === 0 ? 'NO FACE' : `${faceCount} FACES`}
-                </div>
-              )}
-              {detectedItem && (
-                <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1">
-                  <Smartphone size={10} /> {detectedItem.toUpperCase()}
-                </div>
-              )}
+              {/* Floating Candidate Media Controls */}
+              <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 shadow-lg">
+                <button
+                  type="button"
+                  onClick={toggleCandidateMic}
+                  title={micEnabled ? "Mute Microphone" : "Unmute Microphone"}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    micEnabled ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                  }`}
+                >
+                  {micEnabled ? <Mic size={14} /> : <MicOff size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleCandidateCam}
+                  title={camEnabled ? "Turn Off Camera" : "Turn On Camera"}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    camEnabled ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                  }`}
+                >
+                  {camEnabled ? <Video size={14} /> : <VideoOff size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelfViewHidden(!selfViewHidden)}
+                  title={selfViewHidden ? "Show Self Video" : "Minimize / Hide Self Video"}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    selfViewHidden ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-white/10 text-white hover:bg-white/20'
+                  }`}
+                >
+                  {selfViewHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
             </div>
 
             {/* Candidate Name overlay */}
@@ -764,7 +926,7 @@ export default function CandidateSession() {
           {/* Telemetry Strip */}
           <div className="h-10 border-t border-[#1A1A1A] bg-[#0A0A0A] flex items-center px-4 gap-4 text-[10px] font-mono text-gray-500 tracking-wider">
             <div>GAZE Δ {gazeDelta.toFixed(3)}</div>
-            <div>HR {hr} BPM</div>
+            <div>rPPG MONITOR ACTIVE</div>
             <div className="flex items-center gap-1">
               <Users size={12} className={faceCount === 1 ? 'text-green-500' : 'text-red-500'} />
               <span>{faceCount} FACE</span>
@@ -821,7 +983,7 @@ export default function CandidateSession() {
             {/* Modal Body: Two Column Comparison */}
             <div className="p-6 flex flex-col gap-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                
+
                 {/* 1. Stored Reference Photograph */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between text-xs font-semibold text-gray-300">
@@ -843,7 +1005,7 @@ export default function CandidateSession() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div 
+                      <div
                         onClick={() => reuploadInputRef.current?.click()}
                         className="flex flex-col items-center justify-center p-4 text-center cursor-pointer hover:bg-[#151822] transition-colors w-full h-full"
                       >
@@ -885,9 +1047,8 @@ export default function CandidateSession() {
                         />
                         {/* Oval Face Guide Frame */}
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className={`w-36 h-48 rounded-[50%] border-2 border-dashed transition-colors ${
-                            faceCount === 1 ? 'border-emerald-400/80 shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'border-red-400/80'
-                          }`} />
+                          <div className={`w-36 h-48 rounded-[50%] border-2 border-dashed transition-colors ${faceCount === 1 ? 'border-emerald-400/80 shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'border-red-400/80'
+                            }`} />
                         </div>
                       </>
                     ) : (

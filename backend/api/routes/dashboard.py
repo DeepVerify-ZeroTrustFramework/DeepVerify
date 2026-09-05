@@ -78,6 +78,12 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
         # Convert datetime to string for JSON serialization
         if 'timestamp' in alert and hasattr(alert['timestamp'], 'isoformat'):
             alert['timestamp'] = alert['timestamp'].isoformat()
+        if 'alert_id' in alert and 'alertId' not in alert:
+            alert['alertId'] = alert['alert_id']
+        if 'alert_type' in alert and 'alertType' not in alert:
+            alert['alertType'] = alert['alert_type']
+        if 'message' in alert and 'description' not in alert:
+            alert['description'] = alert['message']
         existing_alerts.append(alert)
 
     if existing_alerts:
@@ -130,13 +136,15 @@ async def _listen_redis(pubsub, websocket: WebSocket, session_id: str):
                     parsed = {"raw": data}
 
                 if f'trust_score:{session_id}' in channel:
+                    msg_type = parsed.get("type", "TRUST_UPDATE")
                     await websocket.send_json({
-                        "type": "TRUST_SCORE_UPDATE",
+                        "type": msg_type,
                         **parsed,
                     })
                 elif f'alerts:{session_id}' in channel:
+                    msg_type = parsed.get("type", "ALERT")
                     await websocket.send_json({
-                        "type": "ALERT",
+                        "type": msg_type,
                         **parsed,
                     })
 

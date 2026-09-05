@@ -11,7 +11,7 @@
  * ICE candidates that arrive before setRemoteDescription are queued
  * and flushed once the remote description is set.
  */
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 
 export type WebRTCState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error'
 
@@ -43,8 +43,46 @@ export function useWebRTC(
   const wsRef = useRef<WebSocket | null>(null)
   const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
   const hasRemoteDescription = useRef(false)
+  const isCreatingOffer = useRef(false)
   const isInitialized = useRef(false)
   const remoteStreamRef = useRef<MediaStream>(new MediaStream())
+
+  const localStreamRef = useRef<MediaStream | null>(localStream)
+
+  const attachTracksToPC = useCallback(async (pc: RTCPeerConnection, stream: MediaStream | null) => {
+    if (!pc || !stream) return
+    const tracks = stream.getTracks()
+    for (const track of tracks) {
+      const transceivers = pc.getTransceivers()
+      const tc = transceivers.find((t) => t.receiver?.track?.kind === track.kind)
+      if (tc) {
+        tc.direction = 'sendrecv'
+        if (tc.sender.track !== track) {
+          try {
+            await tc.sender.replaceTrack(track)
+            console.log(`[WebRTC] Replaced ${track.kind} track on transceiver`)
+          } catch (err) {
+            console.warn(`[WebRTC] replaceTrack failed for ${track.kind}:`, err)
+          }
+        }
+      } else {
+        try {
+          pc.addTrack(track, stream)
+          console.log(`[WebRTC] Attached track ${track.kind} via addTrack`)
+        } catch (e) {
+          console.warn(`[WebRTC] addTrack fallback failed:`, e)
+        }
+      }
+    }
+  }, [])
+
+  // Dynamically attach local tracks or replace existing sender tracks
+  useEffect(() => {
+    localStreamRef.current = localStream
+    if (pcRef.current && localStream) {
+      attachTracksToPC(pcRef.current, localStream)
+    }
+  }, [localStream, attachTracksToPC])
 
   /**
    * Flush any ICE candidates that were queued before the remote
@@ -78,7 +116,31 @@ export function useWebRTC(
     const ws = wsRef.current
     if (!pc || !ws || ws.readyState !== WebSocket.OPEN) return
 
+    // If we already have a local offer that wasn't answered yet, re-send it
+    if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
+      console.log('[WebRTC] Re-sending pending local offer to peer...')
+      ws.send(JSON.stringify({
+        type: 'offer',
+        sdp: pc.localDescription.sdp,
+      }))
+      return
+    }
+
+    if (pc.signalingState !== 'stable') {
+      console.warn(`[WebRTC] Postponing offer: signalingState is ${pc.signalingState}`)
+      return
+    }
+    if (isCreatingOffer.current) {
+      console.log('[WebRTC] Offer already in flight, skipping redundant trigger')
+      return
+    }
+
     try {
+      isCreatingOffer.current = true
+      if (localStreamRef.current) {
+        await attachTracksToPC(pc, localStreamRef.current)
+      }
+
       console.log('[WebRTC] Creating SDP offer...')
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -92,8 +154,10 @@ export function useWebRTC(
       console.error('[WebRTC] Failed to create/send offer:', e)
       setState('error')
       setError('Failed to create video offer')
+    } finally {
+      isCreatingOffer.current = false
     }
-  }, [])
+  }, [attachTracksToPC])
 
   /**
    * Handle an incoming SDP offer (interviewer only).
@@ -112,6 +176,11 @@ export function useWebRTC(
       // Flush any ICE candidates that arrived before the offer
       await flushIceCandidates()
 
+      // Attach latest local tracks to transceivers before creating answer
+      if (localStreamRef.current) {
+        await attachTracksToPC(pc, localStreamRef.current)
+      }
+
       console.log('[WebRTC] Creating SDP answer...')
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
@@ -126,7 +195,7 @@ export function useWebRTC(
       setState('error')
       setError('Failed to respond to video offer')
     }
-  }, [flushIceCandidates])
+  }, [flushIceCandidates, attachTracksToPC])
 
   /**
    * Handle an incoming SDP answer (candidate only).
@@ -186,20 +255,44 @@ export function useWebRTC(
     const pc = new RTCPeerConnection(ICE_CONFIG)
     pcRef.current = pc
 
-    // Add local media tracks (both sides send video + audio)
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream)
-        console.log(`[WebRTC] Added local ${track.kind} track`)
+    // Add existing tracks directly so sender and stream IDs are immediately bound
+    if (localStreamRef.current && localStreamRef.current.getTracks().length > 0) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        try {
+          pc.addTrack(track, localStreamRef.current!)
+          console.log(`[WebRTC] Initialized track ${track.kind} (${track.id}) with stream`)
+        } catch (e) {
+          console.warn('[WebRTC] Error adding initial track:', e)
+        }
       })
+    }
+
+    // Ensure transceivers exist for both audio and video so we can receive
+    const existingKinds = pc.getTransceivers().map((t) => t.receiver?.track?.kind)
+    if (!existingKinds.includes('audio')) {
+      try { pc.addTransceiver('audio', { direction: 'sendrecv' }) } catch {}
+    }
+    if (!existingKinds.includes('video')) {
+      try { pc.addTransceiver('video', { direction: 'sendrecv' }) } catch {}
     }
 
     // Handle incoming remote tracks
     pc.ontrack = (event) => {
-      console.log(`[WebRTC] Received remote ${event.track.kind} track`)
+      console.log(`[WebRTC] Received remote ${event.track.kind} track (${event.track.id})`)
 
-      // Add to our accumulating remote stream
-      remoteStreamRef.current.addTrack(event.track)
+      if (event.streams && event.streams[0]) {
+        remoteStreamRef.current = event.streams[0]
+      } else {
+        const exists = remoteStreamRef.current.getTracks().some((t) => t.id === event.track.id)
+        if (!exists) {
+          remoteStreamRef.current.addTrack(event.track)
+        }
+      }
+
+      event.track.onunmute = () => {
+        console.log(`[WebRTC] Remote track ${event.track.kind} unmuted`)
+        setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
+      }
 
       // Create a fresh MediaStream reference so React detects the change
       setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
@@ -268,12 +361,16 @@ export function useWebRTC(
           }
           break
 
+        case 'ready':
+          console.log(`[WebRTC] Remote peer sent ready (${msg.from || 'peer'})`)
+          if (role === 'candidate') {
+            createAndSendOffer()
+          }
+          break
+
         case 'peer-joined':
           console.log(`[WebRTC] Peer joined: ${msg.role}`)
-          // If we're the candidate and the interviewer just joined,
-          // but we haven't created an offer yet, do it now.
-          // This handles the case where the candidate loaded first.
-          if (role === 'candidate' && msg.role === 'interviewer' && !hasRemoteDescription.current) {
+          if (role === 'candidate') {
             createAndSendOffer()
           }
           break
@@ -304,6 +401,11 @@ export function useWebRTC(
           setRemoteStream(null)
           remoteStreamRef.current = new MediaStream()
           hasRemoteDescription.current = false
+          if (pc && pc.signalingState === 'have-local-offer') {
+            try {
+              pc.setLocalDescription({ type: 'rollback' }).catch(() => {})
+            } catch {}
+          }
           break
 
         case 'pong':
@@ -330,8 +432,8 @@ export function useWebRTC(
       }
     }, 25000)
 
-    // Store cleanup ref for the ping interval
-    ;(pc as any).__pingInterval = pingInterval
+      // Store cleanup ref for the ping interval
+      ; (pc as any).__pingInterval = pingInterval
 
   }, [sessionId, role, localStream, createAndSendOffer, handleOffer, handleAnswer, handleIceCandidate])
 

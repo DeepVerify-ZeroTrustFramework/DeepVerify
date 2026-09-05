@@ -11,7 +11,7 @@ import { useWebRTC } from '../hooks/useWebRTC'
 export default function InterviewerDash() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
-  
+
   const [session, setSession] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -48,7 +48,7 @@ export default function InterviewerDash() {
 
   // Initialize WebSockets for dashboard data
   const { score, breakdown, raw, alerts, status: wsStatus, acknowledgeAlert } = useTrustScore(sessionId || '')
-  
+
   // Initialize WebRTC
   const rtc = useWebRTC(sessionId || '', 'interviewer', localStream)
 
@@ -59,22 +59,32 @@ export default function InterviewerDash() {
         if (!res.ok) throw new Error('Session not found')
         const data = await res.json()
         setSession(data)
-        
-        // Get camera for interviewer PiP
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-          setLocalStream(stream)
-        } catch (e) {
-          console.warn('Interviewer camera access denied or missing')
-        }
       } catch (err) {
         setError('Session not found.')
       } finally {
         setLoading(false)
       }
+
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          setLocalStream(stream)
+        }
+      } catch (e) {
+        console.warn('Interviewer camera access not available on mount (may be locked by candidate):', e)
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+            setLocalStream(audioStream)
+          }
+        } catch (audioErr) {
+          console.warn('Interviewer audio access also unavailable:', audioErr)
+          setLocalStream(new MediaStream())
+        }
+      }
     }
     init()
-    
+
     return () => {
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop())
@@ -82,8 +92,31 @@ export default function InterviewerDash() {
     }
   }, [sessionId])
 
+  const [camEnabled, setCamEnabled] = useState(true)
+
+  const toggleCamera = async () => {
+    if (!localStream) {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          setLocalStream(stream)
+          setCamEnabled(true)
+        }
+      } catch (e) {
+        console.warn('Could not start interviewer camera:', e)
+      }
+      return
+    }
+
+    const next = !camEnabled
+    localStream.getVideoTracks().forEach((t) => {
+      t.enabled = next
+    })
+    setCamEnabled(next)
+  }
+
   useEffect(() => {
-    // Connect to signaling WebSocket and set up P2P connection
+    // Connect to signaling WebSocket and set up P2P connection once stream is ready
     if (session && localStream) {
       rtc.initialize()
     }
@@ -97,7 +130,7 @@ export default function InterviewerDash() {
   if (loading) {
     return <div className="min-h-screen bg-[#F7F7F8] flex items-center justify-center"><Loader2 className="animate-spin text-[#A4123F]" /></div>
   }
-  
+
   if (error || !session) {
     return <div className="min-h-screen bg-[#F7F7F8] flex flex-col items-center justify-center text-center p-6">
       <AlertCircle className="text-[#991B1B] w-12 h-12 mb-4" />
@@ -164,7 +197,7 @@ export default function InterviewerDash() {
 
   // Waiting Room state (BUG 3 & 4 FIX)
   const isCandidateReady = session.status === 'ACTIVE' || wsStatus === 'CONNECTED'
-  
+
   if (!isCandidateReady) {
     return (
       <div className="min-h-screen bg-[#F7F7F8] flex flex-col">
@@ -203,7 +236,7 @@ export default function InterviewerDash() {
   // Main Dashboard
   return (
     <div className="min-h-screen bg-[#F7F7F8] flex flex-col font-sans">
-      
+
       {/* Top Navbar */}
       <nav className="h-16 bg-white border-b border-[#E4E4E6] flex items-center justify-between px-6 shrink-0 z-10 sticky top-0">
         <div className="flex items-center gap-2">
@@ -219,7 +252,7 @@ export default function InterviewerDash() {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E6F4ED] rounded-full text-[#1A6B3C] text-[11px] font-semibold border border-[#1A6B3C]/20">
             <span className="relative flex h-1.5 w-1.5">
@@ -228,6 +261,17 @@ export default function InterviewerDash() {
             </span>
             Connection Secure
           </div>
+          <button
+            onClick={toggleCamera}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${localStream
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+              }`}
+            title={localStream ? "Turn off interviewer camera" : "Turn on interviewer camera"}
+          >
+            <Camera size={14} className={localStream ? 'text-emerald-600' : 'text-gray-400'} />
+            <span>{localStream ? 'Interviewer Cam On' : 'Interviewer Cam Off'}</span>
+          </button>
           <button className="px-4 py-2 text-[13px] font-semibold text-[#991B1B] hover:bg-[#FEE2E2] rounded-xl transition-colors border border-transparent hover:border-[#FCA5A5]">
             Flag Session
           </button>
@@ -243,7 +287,7 @@ export default function InterviewerDash() {
 
       {/* Main Grid */}
       <div className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
-        
+
         {/* Left Column: Video & Candidate Info (4 cols) */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           {/* Video Card */}
@@ -253,7 +297,13 @@ export default function InterviewerDash() {
               <span className="text-[11px] font-mono text-[#6B6B6B]">720p / 30fps</span>
             </div>
             <div className="relative aspect-[4/3] bg-[#0A0A0A]">
-              <VideoRoom state={rtc.state} remoteStream={rtc.remoteStream} localStream={localStream} status={wsStatus} />
+              <VideoRoom
+                state={rtc.state}
+                remoteStream={rtc.remoteStream}
+                localStream={localStream}
+                onLocalStreamChange={setLocalStream}
+                status={wsStatus}
+              />
             </div>
           </div>
 
@@ -332,20 +382,20 @@ export default function InterviewerDash() {
           <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm flex flex-col items-center justify-center flex-1">
             <h2 className="text-[12px] font-bold uppercase tracking-wider text-[#6B6B6B] mb-6">Aggregate Trust Score</h2>
             <TrustGauge score={score} />
-            
+
             {/* Raw metrics strip */}
             <div className="w-full mt-8 grid grid-cols-3 gap-2 border-t border-[#E4E4E6] pt-6">
               <div className="text-center">
                 <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">PCE</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{raw.pce.toFixed(1)}</p>
+                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.pce ?? 0).toFixed(1)}</p>
               </div>
               <div className="text-center border-l border-r border-[#E4E4E6]">
                 <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">SNR</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{raw.snr_rppg.toFixed(1)}</p>
+                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.snr_rppg ?? 0).toFixed(1)}</p>
               </div>
               <div className="text-center">
                 <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">CV</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{raw.cv_jitter.toFixed(3)}</p>
+                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.cv_jitter ?? 0).toFixed(3)}</p>
               </div>
             </div>
           </div>
@@ -353,7 +403,7 @@ export default function InterviewerDash() {
           {/* Module Breakdown Card */}
           <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm">
             <h2 className="text-[13px] font-bold text-[#0F0F0F] mb-5">Forensic Breakdown</h2>
-            <ModuleBreakdown breakdown={breakdown} />
+            <ModuleBreakdown breakdown={breakdown ?? { prnu: 0, rppg: 0, jitter: 0, behavioral: 0 }} />
           </div>
         </div>
 
@@ -364,14 +414,14 @@ export default function InterviewerDash() {
               <Activity size={16} className="text-[#A4123F]" />
               <h2 className="text-[13px] font-bold text-[#0F0F0F]">Anomaly Detection</h2>
             </div>
-            {alerts.length > 0 && (
+            {alerts && alerts.length > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-[#FEE2E2] text-[#991B1B] text-[10px] font-bold">
                 {alerts.length} New
               </span>
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 bg-[#F7F7F8]">
-            <AlertFeed alerts={alerts} onAcknowledge={acknowledgeAlert} />
+            <AlertFeed alerts={alerts || []} onAcknowledge={acknowledgeAlert} />
           </div>
         </div>
       </div>

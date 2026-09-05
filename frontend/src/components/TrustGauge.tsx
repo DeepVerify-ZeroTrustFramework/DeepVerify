@@ -1,4 +1,6 @@
-export default function TrustGauge({ score }: { score: number }) {
+export default function TrustGauge({ score = 100 }: { score?: number }) {
+  const safeScore = typeof score === 'number' && !isNaN(score) ? Math.min(100, Math.max(0, score)) : 100
+
   const getScoreColor = (s: number) => {
     if (s >= 80) return '#1A6B3C' // Success
     if (s >= 60) return '#92400E' // Warning
@@ -11,10 +13,10 @@ export default function TrustGauge({ score }: { score: number }) {
     return 'Critical Alert'
   }
 
-  const color = getScoreColor(score)
-  const status = getScoreStatus(score)
+  const color = getScoreColor(safeScore)
+  const status = getScoreStatus(safeScore)
   const circumference = 2 * Math.PI * 54 // r=54
-  const offset = circumference - (score / 100) * circumference
+  const offset = circumference - (safeScore / 100) * circumference
 
   return (
     <div className="flex flex-col items-center">
