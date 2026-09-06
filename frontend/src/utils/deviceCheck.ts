@@ -34,6 +34,7 @@ export async function detectVirtualCamera(): Promise<{detected: boolean; deviceN
     const devices = await navigator.mediaDevices.enumerateDevices()
     const videoDevices = devices.filter(d => d.kind === 'videoinput')
 
+
     const suspicious = videoDevices.filter(device =>
       isVirtualDeviceLabel(device.label)
     )

@@ -12,7 +12,7 @@ import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from db.mongo import get_sessions_collection, get_telemetry_collection, get_alerts_collection, get_behavioral_events_collection
 from db.redis_client import publish_trust_score, publish_alert
-from modules.prnu import extract_noise_residual, compute_pce
+from modules.prnu import extract_noise_residual, compute_pce, estimate_prnu_reference
 from modules.rppg import RPPGAnalyzer
 from modules.jitter import JitterAnalyzer
 from modules.behavioral import BehavioralTracker
@@ -46,6 +46,8 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None):
             ),
             'last_fusion_time': 0.0,
             'frame_count': 0,
+            'prnu_enrollment_frames': [],
+            'k_hat': None,
             'last_pce': 0.0,  # Zero-Trust default: unverified until live calculation passes
             'last_snr': 0.0,  # Zero-Trust default: unverified until live calculation passes
             'last_cv': 0.05,
@@ -131,29 +133,50 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
     frame = cv2.resize(frame, (320, 240))
     analyzers['frame_count'] += 1
 
-    # Ensure K_hat is loaded from memory or disk
-    if K_hat is None:
-        K_hat = get_prnu_reference(session_id)
+    # Ensure K_hat is loaded from memory, disk, or dynamically extracted for Demo Mode
+    current_k_hat = K_hat
+    if current_k_hat is None:
+        current_k_hat = analyzers.get('k_hat')
+    if current_k_hat is None:
+        current_k_hat = get_prnu_reference(session_id)
+        if current_k_hat is not None:
+            analyzers['k_hat'] = current_k_hat
+
+    # Dynamic Demo Mode PRNU Enrollment: Collect first 20 frames to build fingerprint
+    if current_k_hat is None:
+        analyzers['prnu_enrollment_frames'].append(frame.copy())
+        if len(analyzers['prnu_enrollment_frames']) >= 20:
+            print(f"[PRNU] Extracting dynamic fingerprint from 20 demo frames for {session_id}...")
+            try:
+                analyzers['k_hat'] = estimate_prnu_reference(analyzers['prnu_enrollment_frames'])
+                current_k_hat = analyzers['k_hat']
+                print(f"[PRNU] Dynamic fingerprint extraction complete.")
+            except Exception as e:
+                print(f"[PRNU] Dynamic extraction failed: {e}")
+            # Free memory
+            analyzers['prnu_enrollment_frames'] = []
 
     analyzers['last_frame_received_at'] = time.time()
     analyzers['camera_active'] = True
 
     # --- PRNU Analysis (every 10th frame: 1x per second) ---
     if analyzers['frame_count'] % 10 == 0:
-        if K_hat is not None:
+        if current_k_hat is not None:
             try:
                 W_test = extract_noise_residual(frame)
-                pce = compute_pce(W_test, K_hat)
+                pce = compute_pce(W_test, current_k_hat)
                 prev_pce = analyzers.get('last_pce', 0.0)
                 if prev_pce > 0.0:
                     smooth_pce = 0.7 * prev_pce + 0.3 * pce
                 else:
                     smooth_pce = pce
                 analyzers['last_pce'] = float(smooth_pce)
+                print(f"[PRNU-DEBUG] Frame {analyzers['frame_count']} | Raw PCE={pce:.2f} | Smooth PCE={smooth_pce:.2f}")
             except Exception as e:
                 print(f"[PRNU] Error: {e}")
                 analyzers['last_pce'] = 0.0
         else:
+            # Still collecting frames
             analyzers['last_pce'] = 0.0
 
     # --- rPPG Analysis (every frame) ---

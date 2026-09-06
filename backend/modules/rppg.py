@@ -204,20 +204,26 @@ def compute_pos_signal(rgb_timeseries: List[Tuple[float, float, float]],
 
 
 def detect_liveness(h_filtered: np.ndarray, fs: float = 10.0,
-                    snr_threshold_db: float = 3.0) -> Tuple[bool, float, float]:
+                    snr_threshold_db: float = 3.0,
+                    rgb_window: list = None) -> Tuple[bool, float, float]:
     """
-    FFT-based liveness detection using in-band harmonic signal-to-noise ratio.
+    FFT-based liveness detection using in-band harmonic signal-to-noise ratio,
+    hardened against AI-generated deepfake videos.
+
     Reference: de Haan & Jeanne (2013) POS method; Wang et al. (2017).
 
-    A real human pulse produces a sharp spectral peak at fundamental cardiac frequency f0
-    (0.7-3.5 Hz / 42-210 BPM) and its harmonic 2*f0.
-    Pre-recorded video, screens, and noise lack coherent periodicity and exhibit
-    flat/diffuse spectral power across the physiological band, yielding low in-band SNR.
+    Anti-deepfake checks:
+    1. In-band SNR with enforced physical noise floor
+    2. Spectral concentration ratio (SCR) — real pulse has sharp peak, AI noise is diffuse
+    3. Green channel temporal dominance — real hemoglobin absorption is G-channel dominant
+    4. Signal amplitude gating — real rPPG amplitudes fall in a physiological range
+    5. Spectral peak prominence against noise median
 
     Args:
         h_filtered: Bandpass-filtered pulse signal from compute_pos_signal()
         fs: Sampling frequency in Hz
         snr_threshold_db: Per-candidate β threshold from enrollment
+        rgb_window: Optional list of (R, G, B) tuples for cross-channel analysis
 
     Returns:
         (is_live, snr_db, heart_rate_bpm) tuple
@@ -255,32 +261,99 @@ def detect_liveness(h_filtered: np.ndarray, fs: float = 10.0,
     P_sig = float(np.sum(band_power[sig_mask]))
     P_noise = float(np.sum(band_power[~sig_mask]))
 
-    # Standard physical signal-to-noise ratio: total pulsatile harmonic power vs total in-band noise
-    # In authentic human rPPG, P_sig > P_noise. In synthetic / deepfake video, P_sig << P_noise.
-    snr_phys = 10.0 * np.log10(P_sig / max(P_noise, 1e-10))
+    N_sig = max(1, int(np.sum(sig_mask)))
+    noise_mask = ~sig_mask
+    P_noise = float(np.sum(band_power[noise_mask]))
+    N_noise = max(1, int(np.sum(noise_mask)))
+
+    # Compute average spectral energy density per bin
+    sig_density = P_sig / N_sig
+    noise_density = P_noise / N_noise
+
+    # ANTI-DEEPFAKE: Enforce minimum physical noise floor.
+    # Real cameras always have thermal/quantization noise. AI-generated videos are
+    # unnaturally clean, causing tiny compression artifacts to register as strong signals.
+    # At 10 FPS with 320x240 JPEG compression, real camera SNR rarely exceeds 4-5 dB.
+    # We set floor at 30% of signal to cap theoretical max SNR at ~5.2 dB.
+    min_physical_noise = max(sig_density * 0.3, 1e-5)
+    noise_density = max(noise_density, min_physical_noise)
+
+    # In-band SNR (dB)
+    snr_db = 10.0 * np.log10(max(sig_density, 1e-10) / max(noise_density, 1e-10))
 
     # Prominence relative to median in-band noise floor
     median_noise = float(np.median(band_power[~sig_mask])) if np.sum(~sig_mask) > 0 else 1e-10
     prominence = peak_power / max(median_noise, 1e-10)
 
-    # Biological pulse criteria:
-    # 1. Physical in-band signal dominance (SNR >= -0.5 dB)
-    # 2. Spectral peak prominence >= 5.5 (sharp pulse vs flat/diffuse video noise)
-    # 3. Heart rate within physiological human range [45, 195] BPM
+    # ── ANTI-DEEPFAKE CHECK 1: Spectral Concentration Ratio (SCR) ──
+    # A real cardiac pulse concentrates >35% of total in-band power in a narrow
+    # peak window (f0 ± 0.3 Hz). AI artifacts spread energy diffusely across the band.
+    total_band_power = float(np.sum(band_power))
+    peak_window_mask = (band_freqs >= (f0 - 0.3)) & (band_freqs <= (f0 + 0.3))
+    peak_window_power = float(np.sum(band_power[peak_window_mask]))
+    scr = peak_window_power / max(total_band_power, 1e-12)
+    scr_pass = scr >= 0.30  # Relaxed to 0.30 for real-world compressed video
+
+    # ── ANTI-DEEPFAKE CHECK 2: Green Channel Dominance ──
+    # Real hemoglobin absorption causes the Green channel to carry strong
+    # pulse signal variance. We check that Green carries at least 25% of the total variance.
+    green_dominant = True  # Default pass if no RGB data available
+    if rgb_window and len(rgb_window) >= 20:
+        r_vals = np.array([x[0] for x in rgb_window], dtype=np.float64)
+        g_vals = np.array([x[1] for x in rgb_window], dtype=np.float64)
+        b_vals = np.array([x[2] for x in rgb_window], dtype=np.float64)
+        # Detrend before variance comparison
+        r_var = float(np.var(r_vals - np.mean(r_vals)))
+        g_var = float(np.var(g_vals - np.mean(g_vals)))
+        b_var = float(np.var(b_vals - np.mean(b_vals)))
+        total_var = r_var + g_var + b_var
+        if total_var > 1e-10:
+            g_ratio = g_var / total_var
+            green_dominant = g_ratio >= 0.25  # Relaxed from strictly dominant to just carrying significant variance
+        else:
+            green_dominant = False
+
+    # ── ANTI-DEEPFAKE CHECK 3: Signal Amplitude Gating ──
+    # Real rPPG signals (blood flow) are extremely subtle color changes.
+    # AI videos often produce periodic artifacts that are suspiciously LARGE.
+    # Real pulse amplitude is typically 0.05 to 0.35. AI artifacts often exceed 0.8.
+    amplitude = float(np.max(h_filtered) - np.min(h_filtered))
+    amplitude_pass = 0.002 <= amplitude <= 0.50  # Must not be impossibly large
+
+    # ── ANTI-DEEPFAKE CHECK 4: Spectral Flatness ──
+    geo_mean = np.exp(np.mean(np.log(band_power + 1e-20)))
+    arith_mean = np.mean(band_power)
+    spectral_flatness = geo_mean / max(arith_mean, 1e-20)
+    flatness_pass = spectral_flatness < 0.75  # Relaxed from 0.4 — real webcams have some noise
+
+    print(f"[rPPG-DEBUG] SNR={snr_db:.2f}dB prom={prominence:.1f} SCR={scr:.3f}({scr_pass}) "
+          f"green_dom={green_dominant} amp={amplitude:.5f}({amplitude_pass}) "
+          f"flatness={spectral_flatness:.4f}({flatness_pass}) HR={heart_rate_bpm:.1f}BPM")
+
+    # ── Combined Biological Pulse Criteria ──
     is_live = bool(
-        (snr_phys >= -0.5) and
-        (prominence >= 5.5) and
-        (45.0 <= heart_rate_bpm <= 195.0)
+        (snr_db >= snr_threshold_db) and
+        (prominence >= 4.0) and
+        (45.0 <= heart_rate_bpm <= 195.0) and
+        scr_pass and
+        green_dominant and
+        amplitude_pass and
+        flatness_pass
     )
 
-    if is_live:
-        reported_snr = max(2.5, snr_phys + 1.5)
-    else:
-        # Synthetic / pre-recorded / deepfake face without biological pulse
-        # Report negative SNR (< -2.5 dB) so Axiom Engine recognizes non-biological feed
-        reported_snr = min(float(snr_phys), -3.0)
+    # If the video fails multiple severe deepfake checks, cap the SNR
+    # (We require it to fail at least two to avoid penalizing temporary noise in real videos)
+    fake_indicators = 0
+    if not scr_pass: fake_indicators += 1
+    if not green_dominant: fake_indicators += 1
+    if not flatness_pass: fake_indicators += 1
+    if prominence < 4.0: fake_indicators += 1
+    if amplitude > 0.50: fake_indicators += 2  # Impossibly large amplitude is a strong fake signal
 
-    return is_live, round(float(reported_snr), 2), round(float(heart_rate_bpm if is_live else 0.0), 1)
+    if fake_indicators >= 2:
+        snr_db = min(snr_db, -2.0)  # Force well below threshold → liveness fail
+
+    return is_live, round(float(snr_db), 2), round(float(heart_rate_bpm), 1)
 
 
 class RPPGAnalyzer:
@@ -328,7 +401,8 @@ class RPPGAnalyzer:
             return None
 
         is_live, snr_db, heart_rate_bpm = detect_liveness(
-            h_filtered, self.fs, self.snr_threshold_db
+            h_filtered, self.fs, self.snr_threshold_db,
+            rgb_window=window  # Pass RGB data for green channel dominance check
         )
 
         # Smooth output with Exponential Moving Average (alpha = 0.25)

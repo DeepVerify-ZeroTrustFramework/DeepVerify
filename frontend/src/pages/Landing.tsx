@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Cpu, HeartPulse, Activity, Eye, ArrowRight, Check, X } from 'lucide-react'
+import { Cpu, HeartPulse, Activity, Eye, ArrowRight, Check, X, Play } from 'lucide-react'
 import Navbar from '../components/Navbar'
 
 /* ── Animated trust score counter ─── */
@@ -137,6 +137,26 @@ export default function Landing() {
                 </p>
               </Link>
             </div>
+
+            <Link
+              to="/demo"
+              className="flex items-center justify-between p-4 mb-8 rounded-xl border border-[#A4123F] bg-[#FDF2F5] hover:bg-[#FBE8EC] transition-all group shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[#A4123F] flex items-center justify-center shrink-0">
+                  <Play size={18} className="text-white ml-0.5" />
+                </div>
+                <div>
+                  <span className="text-[13px] font-bold text-[#A4123F] block mb-0.5">
+                    Try Demo Mode
+                  </span>
+                  <span className="text-[11px] text-[#A4123F]/80 block leading-tight">
+                    Upload a video to test our live forensic deepfake detection algorithms.
+                  </span>
+                </div>
+              </div>
+              <ArrowRight size={16} className="text-[#A4123F] group-hover:translate-x-1 transition-all" />
+            </Link>
 
             <p className="text-[12px] text-[#9B9B9B]">
               Passive Forensics: PRNU Wavelet Denoising · POS rPPG Pulse · Scapy Jitter Profiling
