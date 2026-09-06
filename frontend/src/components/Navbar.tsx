@@ -12,16 +12,16 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-[#E4E4E6]">
-      <div className="max-w-[1100px] mx-auto px-6 h-16 flex items-center justify-between">
+    <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[1100px] z-50 rounded-[1.25rem] bg-white/70 backdrop-blur-xl border border-white/80 shadow-[0_4px_24px_rgba(0,0,0,0.04)]">
+      <div className="px-6 h-[4.5rem] flex items-center justify-between">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[#A4123F] flex items-center justify-center">
-            <ShieldCheck size={18} className="text-white" />
+        <Link to="/" className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#A4123F] flex items-center justify-center shadow-sm">
+            <ShieldCheck size={20} className="text-white" />
           </div>
-          <div>
-            <p className="text-sm font-bold text-[#0F0F0F] leading-tight">DeepVerify</p>
-            <p className="text-[10px] text-[#6B6B6B] leading-tight">Zero-Trust Interview Integrity</p>
+          <div className="flex flex-col justify-center">
+            <p className="text-[15px] font-bold text-[#0F0F0F] leading-tight">DeepVerify</p>
+            <p className="text-[11px] font-medium text-[#888888] leading-tight mt-0.5">Zero-Trust Interview Integrity</p>
           </div>
         </Link>
 
@@ -62,19 +62,19 @@ export default function Navbar() {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-6">
               <Link
                 to="/auth/candidate/login"
-                className="px-3.5 py-1.5 text-xs font-semibold text-[#3A3A3A] hover:text-[#0F0F0F] rounded-lg hover:bg-gray-100 transition-colors"
+                className="text-[13px] font-semibold text-[#555555] hover:text-[#0F0F0F] transition-colors"
               >
                 Candidate Portal
               </Link>
 
               <Link
                 to="/auth/recruiter/login"
-                className="px-4 py-1.5 bg-[#0F0F0F] text-white text-xs font-semibold rounded-xl hover:bg-[#2A2A2A] transition-colors flex items-center gap-1.5 shadow-sm"
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#0F0F0F] text-white text-[13px] font-semibold rounded-full hover:bg-black transition-colors shadow-md"
               >
-                <Building2 size={13} />
+                <Building2 size={16} className="text-white/80" />
                 Company Portal
               </Link>
             </div>
