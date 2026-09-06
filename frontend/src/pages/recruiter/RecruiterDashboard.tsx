@@ -345,11 +345,8 @@ export default function RecruiterDashboard() {
                   style={{ animation: `fadeUp 0.3s ease both`, animationDelay: `${idx * 0.04}s` }}
                 >
                   <div>
-<<<<<<< HEAD
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-[#FDF2F4] text-[#A4123F]">
-                        {inv.role_title}
-                      </span>
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-[#FDF2F4] text-[#A4123F] border border-[#F9C4D0]">{inv.role_title}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                         inv.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                         inv.status === 'CANCELLED' ? 'bg-gray-100 text-gray-500 border border-gray-200' :
@@ -358,22 +355,12 @@ export default function RecruiterDashboard() {
                       }`}>
                         {inv.status}
                       </span>
-                      <span className="text-[11px] text-[#888] flex items-center gap-1">
-                        <Clock size={12} /> {inv.duration} mins
-                      </span>
-                      <span className="text-[11px] text-[#888] flex items-center gap-1">
-                        <Calendar size={12} /> {new Date(inv.created_at).toLocaleDateString()}
-                      </span>
+                      <span className="text-[11px] text-[#9B9B9B] flex items-center gap-1"><Clock size={11} /> {inv.duration} mins</span>
+                      <span className="text-[11px] text-[#9B9B9B] flex items-center gap-1"><Calendar size={11} /> {new Date(inv.created_at).toLocaleDateString()}</span>
                     </div>
-                    <h3 className="text-base font-bold text-[#0F0F0F]">
-                      {inv.candidate_name || inv.candidate_email}
-                    </h3>
-                    <p className="text-xs text-[#6B6B6B]">
-                      Candidate email: <span className="font-mono text-gray-700">{inv.candidate_email}</span>
-                    </p>
-                    <p className="text-[11px] font-mono text-gray-400 mt-1">
-                      Session ID: {inv.session_id}
-                    </p>
+                    <h3 className="text-[15px] font-bold text-[#0F0F0F]">{inv.candidate_name || inv.candidate_email}</h3>
+                    <p className="text-xs text-[#6B6B6B]">Candidate: <span className="font-mono text-[#3A3A3A]">{inv.candidate_email}</span></p>
+                    <p className="text-[10px] font-mono text-[#C0C0C0] mt-0.5">Session: {inv.session_id}</p>
                   </div>
 
                   <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
@@ -381,7 +368,7 @@ export default function RecruiterDashboard() {
                       <button
                         onClick={() => handleCancelInvite(inv.invitation_id)}
                         disabled={cancellingId === inv.invitation_id}
-                        className="px-3 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        className="px-3 py-2 bg-white/70 hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50"
                         title="Revoke and cancel this invitation"
                       >
                         {cancellingId === inv.invitation_id ? (
@@ -392,35 +379,18 @@ export default function RecruiterDashboard() {
                         Cancel Invite
                       </button>
                     )}
-                    <Link
-                      to={`/dashboard/${inv.session_id}`}
-                      className="px-4 py-2.5 bg-[#0F0F0F] hover:bg-[#2A2A2A] text-white text-xs font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                      <Video size={14} />
-                      Enter Forensic Dashboard
-                      <ExternalLink size={12} />
+                    <Link to={`/dashboard/${inv.session_id}`}
+                      className="px-5 py-2.5 text-white text-xs font-semibold rounded-xl flex items-center gap-2 shrink-0 transition-all"
+                      style={{ background: 'linear-gradient(135deg,#0F0F0F,#2A2A2A)', boxShadow: '0 4px 14px rgba(15,15,15,0.2)' }}>
+                      <Video size={13} /> Enter Forensic Dashboard <ExternalLink size={11} />
                     </Link>
-=======
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-[#FDF2F4] text-[#A4123F] border border-[#F9C4D0]">{inv.role_title}</span>
-                      <span className="text-[11px] text-[#9B9B9B] flex items-center gap-1"><Clock size={11} /> {inv.duration} mins</span>
-                      <span className="text-[11px] text-[#9B9B9B] flex items-center gap-1"><Calendar size={11} /> {new Date(inv.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <h3 className="text-[15px] font-bold text-[#0F0F0F]">{inv.candidate_name || inv.candidate_email}</h3>
-                    <p className="text-xs text-[#6B6B6B]">Candidate: <span className="font-mono text-[#3A3A3A]">{inv.candidate_email}</span></p>
-                    <p className="text-[10px] font-mono text-[#C0C0C0] mt-0.5">Session: {inv.session_id}</p>
->>>>>>> 3bb9a72 (UI: Implement glassmorphism in Recruiter and Student dashboards)
                   </div>
-                  <Link to={`/dashboard/${inv.session_id}`}
-                    className="px-5 py-2.5 text-white text-xs font-semibold rounded-xl flex items-center gap-2 shrink-0 transition-all"
-                    style={{ background: 'linear-gradient(135deg,#0F0F0F,#2A2A2A)', boxShadow: '0 4px 14px rgba(15,15,15,0.2)' }}>
-                    <Video size={13} /> Enter Forensic Dashboard <ExternalLink size={11} />
-                  </Link>
                 </div>
               ))
             )}
           </div>
         )}
+
       </main>
 
       {/* ── Footer ── */}
@@ -430,19 +400,6 @@ export default function RecruiterDashboard() {
 
       {/* ══════════════ Invite Modal ══════════════ */}
       {selectedCandidate && (
-<<<<<<< HEAD
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white border border-[#EAEAEA] rounded-2xl p-6 shadow-2xl relative">
-            <button
-              onClick={() => {
-                setSelectedCandidate(null)
-                setInviteError('')
-                setInviteSuccess('')
-              }}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 p-1"
-            >
-              <X size={20} />
-=======
         <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-md flex items-center justify-center p-4">
           <div
             className="w-full max-w-lg rounded-3xl p-7 relative"
@@ -454,10 +411,9 @@ export default function RecruiterDashboard() {
               animation: 'fadeUp 0.3s ease both',
             }}
           >
-            <button onClick={() => setSelectedCandidate(null)}
+            <button onClick={() => { setSelectedCandidate(null); setInviteError(''); setInviteSuccess('') }}
               className="absolute top-5 right-5 w-8 h-8 rounded-xl bg-[#F7F7F8] hover:bg-[#EAEAEA] flex items-center justify-center text-[#6B6B6B] hover:text-[#0F0F0F] transition-all">
               <X size={16} />
->>>>>>> 3bb9a72 (UI: Implement glassmorphism in Recruiter and Student dashboards)
             </button>
 
             <div className="flex items-center gap-3.5 mb-6 pb-5 border-b border-[#F0F0F0]">
