@@ -38,7 +38,8 @@ app = FastAPI(
 )
 
 # CORS
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,https://deepverify-frontend.onrender.com")
+cors_origins = [orig.strip() for orig in cors_raw.split(",") if orig.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
