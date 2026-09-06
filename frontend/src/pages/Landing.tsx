@@ -43,7 +43,7 @@ function FeatureCard({ icon: Icon, iconBg, iconColor, title, desc, weight, layer
   title: string; desc: string; weight: string; layer: string
 }) {
   return (
-    <div className="p-6 rounded-2xl bg-white border border-[#E4E4E6] hover:border-[#A4123F] hover:-translate-y-0.5 transition-all duration-200 group">
+    <div className="p-6 rounded-2xl bg-white/50 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:shadow-[0_15px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 group">
       <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center mb-4`}>
         <Icon size={20} className={iconColor} />
       </div>
@@ -79,11 +79,18 @@ export default function Landing() {
   const [liveScore] = useState(87)
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#FAFAFB] relative overflow-hidden">
+      {/* ─── Ambient Glassmorphism Orbs ─── */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-rose-300/20 blur-[100px] animate-blob" />
+        <div className="absolute top-[20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-indigo-300/10 blur-[120px] animate-blob-slow" />
+        <div className="absolute bottom-[-10%] left-[20%] w-[800px] h-[800px] rounded-full bg-pink-200/20 blur-[140px] animate-blob" style={{ animationDelay: '2s' }} />
+      </div>
+
       <Navbar />
 
       {/* ─── HERO ──────────────────────────────────── */}
-      <section className="max-w-[1100px] mx-auto px-6 py-20">
+      <section className="max-w-[1100px] mx-auto px-6 pt-36 pb-20 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           {/* Left */}
           <div style={{ animation: 'fadeUp 0.4s ease both' }}>
@@ -168,7 +175,7 @@ export default function Landing() {
             className="relative"
             style={{ animation: 'fadeUp 0.4s 0.15s ease both, floatA 4s ease-in-out infinite' }}
           >
-            <div className="rounded-2xl border border-[#E4E4E6] bg-white shadow-xl overflow-hidden">
+            <div className="rounded-2xl border border-white/80 bg-white/40 backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.06)] overflow-hidden">
               {/* Maroon accent bar */}
               <div className="h-[3px] bg-[#A4123F]" />
 
@@ -234,7 +241,7 @@ export default function Landing() {
       </section>
 
       {/* ─── FEATURES ──────────────────────────────── */}
-      <section className="bg-[#F7F7F8] py-20">
+      <section className="py-20 relative z-10">
         <div className="max-w-[1100px] mx-auto px-6">
           <p className="text-[11px] uppercase tracking-widest text-[#A4123F] font-medium mb-3">
             Four-module forensic pipeline
@@ -256,7 +263,7 @@ export default function Landing() {
       </section>
 
       {/* ─── HOW IT WORKS ──────────────────────────── */}
-      <section id="how-it-works" className="py-20 bg-white">
+      <section id="how-it-works" className="py-20 relative z-10">
         <div className="max-w-[1100px] mx-auto px-6">
           <p className="text-[11px] uppercase tracking-widest text-[#A4123F] font-medium mb-3">How it works</p>
           <h2 className="text-3xl font-bold text-[#0F0F0F] mb-12">Five steps to verified integrity</h2>
@@ -283,7 +290,7 @@ export default function Landing() {
       </section>
 
       {/* ─── COMPARISON TABLE ──────────────────────── */}
-      <section className="bg-[#F7F7F8] py-20">
+      <section className="py-20 relative z-10">
         <div className="max-w-[1100px] mx-auto px-6">
           <h2 className="text-3xl font-bold text-[#0F0F0F] mb-2">
             The only platform that checks if the video is real.
@@ -318,7 +325,7 @@ export default function Landing() {
       </section>
 
       {/* ─── STATS STRIP ───────────────────────────── */}
-      <section className="py-16 bg-white">
+      <section className="py-16 relative z-10">
         <div className="max-w-[1100px] mx-auto px-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             {[
@@ -337,8 +344,8 @@ export default function Landing() {
       </section>
 
       {/* ─── CTA BANNER ────────────────────────────── */}
-      <section className="py-16 px-6">
-        <div className="max-w-[1100px] mx-auto bg-[#A4123F] rounded-3xl p-12 text-center">
+      <section className="py-16 px-6 relative z-10">
+        <div className="max-w-[1100px] mx-auto bg-gradient-to-br from-[#A4123F] to-[#7A0D2E] shadow-[0_20px_50px_rgba(164,18,63,0.3)] rounded-3xl p-12 text-center border border-white/10 backdrop-blur-md">
           <h2 className="text-3xl font-bold text-white mb-3">
             Ready to verify your next interview?
           </h2>
