@@ -94,14 +94,7 @@ export default function Landing() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           {/* Left */}
           <div style={{ animation: 'fadeUp 0.4s ease both' }}>
-            {/* Eyebrow */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#E4E4E6] bg-[#F7F7F8] text-[11px] font-medium text-[#6B6B6B] mb-6">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-[#1A6B3C] opacity-75 animate-ping" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#1A6B3C]" />
-              </span>
-              Accepted · IEEE ICOSAAS 2026
-            </div>
+
 
             <h1 className="text-[52px] font-bold text-[#0F0F0F] leading-[1.08] tracking-[-0.04em] mb-5">
               Interviews you<br />can actually<br />
@@ -365,7 +358,7 @@ export default function Landing() {
       <footer className="border-t border-[#E4E4E6] py-8">
         <div className="max-w-[1100px] mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-[12px] text-[#9B9B9B]">
-            © 2025 DeepVerify · Amrita Vishwa Vidyapeetham · IEEE ICOSAAS 2026
+            © 2025 DeepVerify · Amrita Vishwa Vidyapeetham
           </p>
           <div className="flex items-center gap-6">
             <a href="#" className="text-[12px] text-[#9B9B9B] hover:text-[#6B6B6B] transition-colors">Privacy</a>
