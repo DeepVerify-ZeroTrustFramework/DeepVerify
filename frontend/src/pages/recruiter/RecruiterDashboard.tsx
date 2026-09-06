@@ -385,23 +385,35 @@ export default function RecruiterDashboard() {
                       <Video size={13} /> Enter Forensic Dashboard <ExternalLink size={11} />
                     </Link>
                   </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
-        {/* ══════════════ Invite Modal ══════════════ */}
-        {selectedCandidate && (
-          <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-md flex items-center justify-center p-4">
-            <div
-              className="w-full max-w-lg rounded-3xl p-7 relative"
-              style={{
-                background: 'rgba(255,255,255,0.75)',
-                backdropFilter: 'blur(40px)',
-                border: '1px solid rgba(255,255,255,0.9)',
-                boxShadow: '0 32px 64px rgba(0,0,0,0.15)',
-                animation: 'fadeUp 0.3s ease both',
-              }}
-            >
-              <button onClick={() => { setSelectedCandidate(null); setInviteError(''); setInviteSuccess('') }}
-                className="absolute top-5 right-5 w-8 h-8 rounded-xl bg-[#F7F7F8] hover:bg-[#EAEAEA] flex items-center justify-center text-[#6B6B6B] hover:text-[#0F0F0F] transition-all">
-                <X size={16} />
+      </main>
+
+      {/* ── Footer ── */}
+      <footer className="relative z-10 py-6 text-center text-[11px] text-[#C0C0C0]">
+        DeepVerify © 2026 · Standalone Zero-Trust Technical Interview Platform
+      </footer>
+
+      {/* ══════════════ Invite Modal ══════════════ */}
+      {selectedCandidate && (
+        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-md flex items-center justify-center p-4">
+          <div
+            className="w-full max-w-lg rounded-3xl p-7 relative"
+            style={{
+              background: 'rgba(255,255,255,0.75)',
+              backdropFilter: 'blur(40px)',
+              border: '1px solid rgba(255,255,255,0.9)',
+              boxShadow: '0 32px 64px rgba(0,0,0,0.15)',
+              animation: 'fadeUp 0.3s ease both',
+            }}
+          >
+            <button onClick={() => { setSelectedCandidate(null); setInviteError(''); setInviteSuccess('') }}
+              className="absolute top-5 right-5 w-8 h-8 rounded-xl bg-[#F7F7F8] hover:bg-[#EAEAEA] flex items-center justify-center text-[#6B6B6B] hover:text-[#0F0F0F] transition-all">
+              <X size={16} />
             </button>
 
             <div className="flex items-center gap-3.5 mb-6 pb-5 border-b border-[#F0F0F0]">
