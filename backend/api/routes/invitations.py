@@ -37,8 +37,34 @@ async def send_invitation(
             detail=f"Candidate with email '{cand_email}' was not found. Ensure the candidate has registered on DeepVerify."
         )
 
-    # Provision zero-trust session document
+    # Prevent duplicate / overlapping active invites
+    invitations_col = get_invitations_collection()
     sessions_col = get_sessions_collection()
+
+    existing_invites_cursor = invitations_col.find({
+        "$or": [
+            {"candidate_email": cand_email},
+            {"candidate_id": candidate.get("user_id")},
+        ],
+        "status": {"$in": ["PENDING", "ACCEPTED", "IN_PROGRESS"]}
+    })
+    async for inv in existing_invites_cursor:
+        sess = await sessions_col.find_one({"session_id": inv.get("session_id")})
+        sess_status = sess.get("status") if sess else inv.get("status")
+        if sess_status not in ["COMPLETED", "CANCELLED", "EXPIRED"]:
+            cand_name = candidate.get("full_name") or cand_email
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"There is already an existing active invitation for {cand_name} ({cand_email}). You can only send another invite once the previous interview is completed or cancelled."
+            )
+        else:
+            # Sync completed status to stale invitation record
+            await invitations_col.update_one(
+                {"_id": inv["_id"]},
+                {"$set": {"status": sess_status}}
+            )
+
+    # Provision zero-trust session document
     session_doc = SessionDocument(
         candidate_name=candidate.get("full_name", "Candidate"),
         candidate_email=cand_email,
@@ -109,9 +135,17 @@ async def send_invitation(
 
 
 @router.get("/my", response_model=List[InvitationResponse])
-async def get_my_invitations(current_user: dict = Depends(require_candidate)):
-    """Candidate retrieves all interview invitations sent to their account."""
+async def get_my_invitations(
+    include_completed: bool = False,
+    current_user: dict = Depends(require_candidate)
+):
+    """
+    Candidate retrieves interview invitations sent to their account.
+    By default, excludes completed, cancelled, or expired sessions so active inbox remains clean.
+    """
     invitations_col = get_invitations_collection()
+    sessions_col = get_sessions_collection()
+
     cursor = invitations_col.find({
         "$or": [
             {"candidate_email": current_user["email"]},
@@ -121,6 +155,20 @@ async def get_my_invitations(current_user: dict = Depends(require_candidate)):
 
     results = []
     async for doc in cursor:
+        sess = await sessions_col.find_one({"session_id": doc.get("session_id")})
+        sess_status = sess.get("status") if sess else doc.get("status", "PENDING")
+
+        # Sync invitation status if session state transitioned
+        if doc.get("status") != sess_status:
+            await invitations_col.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"status": sess_status}}
+            )
+
+        # Unless explicitly requested, filter out completed/cancelled/expired interviews from active inbox
+        if not include_completed and sess_status in ["COMPLETED", "CANCELLED", "EXPIRED"]:
+            continue
+
         results.append(InvitationResponse(
             invitation_id=doc["invitation_id"],
             recruiter_id=doc["recruiter_id"],
@@ -134,7 +182,7 @@ async def get_my_invitations(current_user: dict = Depends(require_candidate)):
             role_title=doc.get("role_title", "Software Engineer"),
             duration=doc.get("duration", 60),
             message=doc.get("message"),
-            status=doc.get("status", "PENDING"),
+            status=sess_status,
             created_at=doc.get("created_at", datetime.utcnow()),
         ))
     return results
@@ -142,16 +190,54 @@ async def get_my_invitations(current_user: dict = Depends(require_candidate)):
 
 @router.get("/sent", response_model=List[dict])
 async def get_sent_invitations(current_user: dict = Depends(require_recruiter)):
-    """Recruiter retrieves all invitations they have sent."""
+    """Recruiter retrieves all invitations they have sent, synchronized with live session status."""
     invitations_col = get_invitations_collection()
+    sessions_col = get_sessions_collection()
     cursor = invitations_col.find(
         {"recruiter_id": current_user["user_id"]}
     ).sort("created_at", -1)
 
     results = []
     async for doc in cursor:
-        # Check session status from sessions collection
+        sess = await sessions_col.find_one({"session_id": doc.get("session_id")})
+        sess_status = sess.get("status") if sess else doc.get("status", "PENDING")
+        if doc.get("status") != sess_status:
+            await invitations_col.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"status": sess_status}}
+            )
+
         doc_copy = dict(doc)
         doc_copy.pop("_id", None)
+        doc_copy["status"] = sess_status
         results.append(doc_copy)
     return results
+
+
+@router.delete("/{invitation_id}")
+async def cancel_invitation(
+    invitation_id: str,
+    current_user: dict = Depends(require_recruiter)
+):
+    """Recruiter cancels/revokes an active invitation."""
+    invitations_col = get_invitations_collection()
+    sessions_col = get_sessions_collection()
+
+    inv = await invitations_col.find_one({
+        "invitation_id": invitation_id,
+        "recruiter_id": current_user["user_id"]
+    })
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+
+    await invitations_col.update_one(
+        {"invitation_id": invitation_id},
+        {"$set": {"status": "CANCELLED"}}
+    )
+    if inv.get("session_id"):
+        await sessions_col.update_one(
+            {"session_id": inv["session_id"]},
+            {"$set": {"status": "CANCELLED"}}
+        )
+
+    return {"ok": True, "message": "Invitation cancelled successfully"}

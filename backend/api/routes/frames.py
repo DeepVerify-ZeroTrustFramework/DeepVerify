@@ -261,13 +261,33 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
     if time.time() - analyzers.get('last_frame_received_at', time.time()) > 3.0:
         is_cam_active = False
 
+    pce_val = analyzers['last_pce']
+    snr_val = analyzers['last_snr']
+    cv_val = analyzers['last_cv']
+    ack_set = set()
+
+    try:
+        from api.routes.ws_handlers import _get_telemetry
+        telemetry = _get_telemetry(session_id)
+        if telemetry.get("prnu_excused"):
+            pce_val = max(pce_val, thresholds.get('pce_threshold', 45.0) + 5.0)
+        if telemetry.get("rppg_excused"):
+            snr_val = max(snr_val, thresholds.get('snr_beta', 2.0) + 1.0)
+        if telemetry.get("jitter_excused"):
+            cv_val = min(cv_val, thresholds.get('jitter_gamma', 0.15) * 0.5)
+        if telemetry.get("virtual_camera_detected"):
+            is_cam_active = False
+        ack_set = set(telemetry.get("acknowledged_alerts", []))
+    except Exception:
+        pass
+
     result = axiom_fusion_engine(
-        pce=analyzers['last_pce'],
-        snr_rppg=analyzers['last_snr'],
-        cv_jitter=analyzers['last_cv'],
+        pce=pce_val,
+        snr_rppg=snr_val,
+        cv_jitter=cv_val,
         behavioral_score=behavioral_score,
         thresholds={
-            'pce_tau': thresholds.get('pce_threshold', 6.0),
+            'pce_tau': thresholds.get('pce_threshold', 45.0),
             'snr_beta': thresholds.get('snr_beta', 2.0),
             'jitter_gamma': thresholds.get('jitter_gamma', 0.15),
         },
@@ -279,18 +299,24 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
     result['type'] = 'TRUST_UPDATE'
     result['session_id'] = session_id
     result['timestamp'] = now_iso
-    result['pce'] = analyzers['last_pce']
-    result['snr_rppg'] = analyzers['last_snr']
-    result['cv_jitter'] = analyzers['last_cv']
+    result['pce'] = pce_val
+    result['snr_rppg'] = snr_val
+    result['cv_jitter'] = cv_val
     result['behavioral_score'] = behavioral_score
     result['stats'] = analyzers['behavioral'].get_stats()
     result['raw'] = {
-        'pce': float(analyzers['last_pce']),
-        'snr_rppg': float(analyzers['last_snr']),
-        'cv_jitter': float(analyzers['last_cv']),
+        'pce': float(pce_val),
+        'snr_rppg': float(snr_val),
+        'cv_jitter': float(cv_val),
         'behavioral_score': float(behavioral_score),
         'hr_bpm': float(analyzers.get('last_hr_bpm', 72.0)),
     }
+
+    # Filter out acknowledged alerts from result['alerts']
+    result['alerts'] = [
+        a for a in result.get('alerts', [])
+        if a.get('alert_id') not in ack_set and a.get('alertId') not in ack_set
+    ]
 
     # Publish to Redis for dashboard consumption
     await publish_trust_score(session_id, result)

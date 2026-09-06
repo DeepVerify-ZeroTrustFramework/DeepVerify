@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ShieldCheck, Activity, Clock, Loader2, AlertCircle, LogOut, CheckCircle2, XCircle, Camera, Image as ImageIcon, FileText, Home } from 'lucide-react'
+import { 
+  ShieldCheck, Activity, Clock, Loader2, AlertCircle, LogOut, 
+  CheckCircle2, XCircle, Camera, Image as ImageIcon, FileText, Home,
+  Code2, Play, Terminal
+} from 'lucide-react'
+import Editor from '@monaco-editor/react'
 import TrustGauge from '../components/TrustGauge'
 import ModuleBreakdown from '../components/ModuleBreakdown'
 import AlertFeed from '../components/AlertFeed'
@@ -17,6 +22,11 @@ export default function InterviewerDash() {
   const [error, setError] = useState('')
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [showFaceModal, setShowFaceModal] = useState(false)
+  const [activeView, setActiveView] = useState<'forensics' | 'code'>('forensics')
+
+  // Interviewer compiler state
+  const [interviewerRunning, setInterviewerRunning] = useState(false)
+  const [interviewerOutput, setInterviewerOutput] = useState<{ stdout: string; stderr: string; executionTime?: number; status?: string } | null>(null)
 
   // Exit interview state
   const [showEndModal, setShowEndModal] = useState(false)
@@ -34,7 +44,7 @@ export default function InterviewerDash() {
         })
       }
     } catch (e) {
-      console.warn('Failed to update session status', e)
+      console.warn('Failed to mark session complete', e)
     } finally {
       if (localStream) {
         localStream.getTracks().forEach((t) => t.stop())
@@ -46,8 +56,30 @@ export default function InterviewerDash() {
     }
   }
 
-  // Initialize WebSockets for dashboard data
-  const { score, breakdown, raw, alerts, status: wsStatus, acknowledgeAlert } = useTrustScore(sessionId || '')
+  // Initialize WebSockets for dashboard data (including live codeSync & score reversion)
+  const { score, breakdown, raw, alerts, status: wsStatus, codeSync, acknowledgeAlert } = useTrustScore(sessionId || '')
+
+  const handleInterviewerRun = async () => {
+    if (!codeSync?.code || interviewerRunning) return
+    setInterviewerRunning(true)
+    try {
+      const res = await fetch('/api/compiler/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          language: codeSync.language || 'python',
+          code: codeSync.code,
+        }),
+      })
+      const data = await res.json()
+      setInterviewerOutput(data)
+    } catch (err: any) {
+      setInterviewerOutput({ stdout: '', stderr: err.message || 'Execution error' })
+    } finally {
+      setInterviewerRunning(false)
+    }
+  }
 
   // Initialize WebRTC
   const rtc = useWebRTC(sessionId || '', 'interviewer', localStream)
@@ -254,6 +286,38 @@ export default function InterviewerDash() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-gray-100 p-1 rounded-xl border border-gray-200 text-xs font-semibold">
+            <button
+              onClick={() => setActiveView('forensics')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeView === 'forensics'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              <Activity size={14} className="text-[#A4123F]" />
+              <span>Forensics</span>
+              {alerts && alerts.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">
+                  {alerts.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveView('code')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeView === 'code'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              <Code2 size={14} className="text-blue-500" />
+              <span>Live Code & Compiler</span>
+              {codeSync?.code && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>}
+            </button>
+          </div>
+
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E6F4ED] rounded-full text-[#1A6B3C] text-[11px] font-semibold border border-[#1A6B3C]/20">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full rounded-full bg-[#1A6B3C] opacity-75 animate-ping" />
@@ -376,54 +440,192 @@ export default function InterviewerDash() {
           </div>
         </div>
 
-        {/* Center Column: Trust Score & Modules (4 cols) */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          {/* Main Trust Card */}
-          <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm flex flex-col items-center justify-center flex-1">
-            <h2 className="text-[12px] font-bold uppercase tracking-wider text-[#6B6B6B] mb-6">Aggregate Trust Score</h2>
-            <TrustGauge score={score} />
+        {/* Right Section (8 cols): Either Forensics View or Live Code & Compiler */}
+        {activeView === 'forensics' ? (
+          <>
+            {/* Center Column: Trust Score & Modules (4 cols) */}
+            <div className="lg:col-span-4 flex flex-col gap-6">
+              {/* Main Trust Card */}
+              <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm flex flex-col items-center justify-center flex-1">
+                <h2 className="text-[12px] font-bold uppercase tracking-wider text-[#6B6B6B] mb-6">Aggregate Trust Score</h2>
+                <TrustGauge score={score} />
 
-            {/* Raw metrics strip */}
-            <div className="w-full mt-8 grid grid-cols-3 gap-2 border-t border-[#E4E4E6] pt-6">
-              <div className="text-center">
-                <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">PCE</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.pce ?? 0).toFixed(1)}</p>
+                {/* Raw metrics strip */}
+                <div className="w-full mt-8 grid grid-cols-3 gap-2 border-t border-[#E4E4E6] pt-6">
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">PCE</p>
+                    <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.pce ?? 0).toFixed(1)}</p>
+                  </div>
+                  <div className="text-center border-l border-r border-[#E4E4E6]">
+                    <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">SNR</p>
+                    <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.snr_rppg ?? 0).toFixed(1)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">CV</p>
+                    <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.cv_jitter ?? 0).toFixed(3)}</p>
+                  </div>
+                </div>
               </div>
-              <div className="text-center border-l border-r border-[#E4E4E6]">
-                <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">SNR</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.snr_rppg ?? 0).toFixed(1)}</p>
+
+              {/* Module Breakdown Card */}
+              <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm">
+                <h2 className="text-[13px] font-bold text-[#0F0F0F] mb-5">Forensic Breakdown</h2>
+                <ModuleBreakdown breakdown={breakdown ?? { prnu: 0, rppg: 0, jitter: 0, behavioral: 0 }} />
               </div>
-              <div className="text-center">
-                <p className="text-[10px] uppercase tracking-wider text-[#9B9B9B] mb-1">CV</p>
-                <p className="text-[14px] font-mono font-medium text-[#0F0F0F]">{(raw?.cv_jitter ?? 0).toFixed(3)}</p>
+            </div>
+
+            {/* Right Column: Alert Feed (4 cols) */}
+            <div className="lg:col-span-4 bg-white rounded-[16px] border border-[#E4E4E6] shadow-sm flex flex-col h-[calc(100vh-112px)] sticky top-[88px]">
+              <div className="p-4 border-b border-[#E4E4E6] flex justify-between items-center bg-white z-10 rounded-t-[16px]">
+                <div className="flex items-center gap-2">
+                  <Activity size={16} className="text-[#A4123F]" />
+                  <h2 className="text-[13px] font-bold text-[#0F0F0F]">Anomaly Detection</h2>
+                </div>
+                {alerts && alerts.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-[#FEE2E2] text-[#991B1B] text-[10px] font-bold">
+                    {alerts.length} New
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 bg-[#F7F7F8]">
+                <AlertFeed alerts={alerts || []} onAcknowledge={acknowledgeAlert} />
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Live Candidate Code Workspace & Compiler (8 cols) */
+          <div className="lg:col-span-8 bg-[#11131A] rounded-[16px] border border-[#232736] shadow-sm flex flex-col overflow-hidden h-[calc(100vh-112px)] sticky top-[88px] animate-fade-in">
+            {/* Header */}
+            <div className="p-3.5 border-b border-[#232736] flex justify-between items-center bg-[#171A24] text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <Code2 size={16} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[13px] font-bold text-white">Candidate Live Coding Workspace</h2>
+                    <span className="px-2 py-0.5 rounded-md bg-[#232736] text-[11px] font-mono font-semibold text-gray-300">
+                      {codeSync?.language || 'python'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-400">Synchronized bi-directional compiler mirror</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 px-2.5 py-1 bg-emerald-950/40 rounded-lg border border-emerald-800/50">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                  Live Mirror
+                </span>
+
+                <button
+                  onClick={handleInterviewerRun}
+                  disabled={interviewerRunning || !codeSync?.code}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1A6B3C] hover:bg-[#145530] text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow"
+                  title="Execute Candidate Code"
+                >
+                  {interviewerRunning ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Executing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play size={13} className="fill-white" />
+                      <span>Test Run</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Monaco Editor (Candidate Mirrored View) */}
+            <div className="flex-1 relative overflow-hidden bg-[#0D0F16]">
+              {codeSync?.code ? (
+                <Editor
+                  height="100%"
+                  language={codeSync.language || 'python'}
+                  value={codeSync.code}
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    fontSize: 13,
+                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    lineNumbers: 'on',
+                    automaticLayout: true,
+                    wordWrap: 'on',
+                    padding: { top: 12, bottom: 12 },
+                  }}
+                />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 p-6 text-center">
+                  <Code2 size={36} className="text-gray-600 animate-pulse" />
+                  <p className="text-sm font-semibold text-gray-400">Waiting for candidate to start typing...</p>
+                  <p className="text-xs text-gray-500 max-w-sm">
+                    Whatever the candidate types in their Monaco editor will stream here in real time.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Compiler Console Output Panel */}
+            <div className="h-44 border-t border-[#232736] bg-[#0A0C10] flex flex-col font-mono text-xs">
+              <div className="h-8 border-b border-[#1E232E] px-4 flex items-center justify-between bg-[#12151E] text-[11px] text-gray-300">
+                <div className="flex items-center gap-2">
+                  <Terminal size={13} className="text-emerald-400" />
+                  <span className="font-semibold text-gray-200">Live Compiler Console</span>
+                  {(interviewerOutput?.status || codeSync?.status) && (
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                      (interviewerOutput?.status || codeSync?.status) === 'SUCCESS'
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                        : 'bg-red-950 text-red-400 border border-red-800'
+                    }`}>
+                      {interviewerOutput?.status || codeSync?.status}
+                    </span>
+                  )}
+                  {(interviewerOutput?.executionTime || codeSync?.executionTime) !== undefined && (
+                    <span className="text-[10px] text-gray-500">
+                      ({interviewerOutput?.executionTime ?? codeSync?.executionTime}s)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setInterviewerOutput(null)}
+                    className="text-gray-400 hover:text-white text-[10px] cursor-pointer"
+                  >
+                    Clear Output
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 p-3 overflow-y-auto font-mono text-[12px] leading-relaxed select-text bg-[#08090E]">
+                {interviewerRunning || codeSync?.isRunning ? (
+                  <div className="flex items-center gap-2 text-gray-400 py-1">
+                    <Loader2 size={13} className="animate-spin text-emerald-400" />
+                    <span>Executing code in compiler sandbox...</span>
+                  </div>
+                ) : (interviewerOutput || codeSync?.output) ? (
+                  <div>
+                    {interviewerOutput?.stdout && (
+                      <pre className="text-emerald-300 whitespace-pre-wrap font-mono">{interviewerOutput.stdout}</pre>
+                    )}
+                    {interviewerOutput?.stderr && (
+                      <pre className="text-red-400 whitespace-pre-wrap mt-1 font-mono">{interviewerOutput.stderr}</pre>
+                    )}
+                    {!interviewerOutput && codeSync?.output && (
+                      <pre className="text-emerald-300 whitespace-pre-wrap font-mono">{codeSync.output}</pre>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-500 italic">No execution output yet. When candidate compiles or you click 'Test Run', stdout/stderr will appear here.</span>
+                )}
               </div>
             </div>
           </div>
-
-          {/* Module Breakdown Card */}
-          <div className="bg-white rounded-[16px] border border-[#E4E4E6] p-6 shadow-sm">
-            <h2 className="text-[13px] font-bold text-[#0F0F0F] mb-5">Forensic Breakdown</h2>
-            <ModuleBreakdown breakdown={breakdown ?? { prnu: 0, rppg: 0, jitter: 0, behavioral: 0 }} />
-          </div>
-        </div>
-
-        {/* Right Column: Alert Feed (4 cols) */}
-        <div className="lg:col-span-4 bg-white rounded-[16px] border border-[#E4E4E6] shadow-sm flex flex-col h-[calc(100vh-112px)] sticky top-[88px]">
-          <div className="p-4 border-b border-[#E4E4E6] flex justify-between items-center bg-white z-10 rounded-t-[16px]">
-            <div className="flex items-center gap-2">
-              <Activity size={16} className="text-[#A4123F]" />
-              <h2 className="text-[13px] font-bold text-[#0F0F0F]">Anomaly Detection</h2>
-            </div>
-            {alerts && alerts.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-[#FEE2E2] text-[#991B1B] text-[10px] font-bold">
-                {alerts.length} New
-              </span>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 bg-[#F7F7F8]">
-            <AlertFeed alerts={alerts || []} onAcknowledge={acknowledgeAlert} />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Face Verification Comparison Modal for Interviewer */}

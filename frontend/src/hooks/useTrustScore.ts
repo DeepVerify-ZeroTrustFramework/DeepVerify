@@ -46,6 +46,16 @@ function normalizeAlert(a: any): TrustAlert {
   }
 }
 
+export interface CodeSyncState {
+  code: string
+  language: string
+  isRunning: boolean
+  output: string
+  executionTime?: number
+  status?: string
+  lastUpdated?: string
+}
+
 export function useTrustScore(sessionId: string) {
   const [score, setScore] = useState(0)
   const [breakdown, setBreakdown] = useState<TrustBreakdown>({
@@ -58,6 +68,14 @@ export function useTrustScore(sessionId: string) {
   // Start with EMPTY alerts per BUG 3 FIX
   const [alerts, setAlerts] = useState<TrustAlert[]>([])
   const [status, setStatus] = useState<string>('WAITING')
+
+  // Synchronized candidate code editor & compiler state
+  const [codeSync, setCodeSync] = useState<CodeSyncState>({
+    code: '',
+    language: 'python',
+    isRunning: false,
+    output: '',
+  })
 
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -114,6 +132,41 @@ export function useTrustScore(sessionId: string) {
         else if (msg.type === 'EXISTING_ALERTS' && Array.isArray(msg.alerts)) {
           setAlerts(msg.alerts.map(normalizeAlert))
         }
+        else if (msg.type === 'ALERT_ACKNOWLEDGED' || (msg.type === 'COMMAND_ACK' && msg.command === 'ACK_ALERT')) {
+          const ackId = msg.alert_id || msg.alertId
+          setAlerts(prev => prev.filter(a => a.alertId !== ackId && (a as any).alert_id !== ackId))
+          if (typeof msg.new_score === 'number') {
+            setScore(msg.new_score)
+          }
+          if (msg.breakdown) {
+            setBreakdown(prev => ({ ...prev, ...msg.breakdown }))
+          }
+        }
+        else if (msg.type === 'CODE_CHANGE') {
+          setCodeSync(prev => ({
+            ...prev,
+            code: msg.code !== undefined ? msg.code : prev.code,
+            language: msg.language || prev.language,
+            lastUpdated: msg.timestamp || new Date().toISOString(),
+          }))
+        }
+        else if (msg.type === 'CODE_RUNNING') {
+          setCodeSync(prev => ({
+            ...prev,
+            isRunning: true,
+            language: msg.language || prev.language,
+          }))
+        }
+        else if (msg.type === 'CODE_OUTPUT') {
+          setCodeSync(prev => ({
+            ...prev,
+            isRunning: false,
+            output: msg.stdout || msg.stderr || 'Executed with no terminal output.',
+            executionTime: msg.execution_time,
+            status: msg.status,
+            language: msg.language || prev.language,
+          }))
+        }
         else if (msg.type === 'STATUS_CHANGE') {
           setStatus(msg.status)
         }
@@ -141,9 +194,12 @@ export function useTrustScore(sessionId: string) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'ACKNOWLEDGE_ALERT',
-        alertId
+        command: 'ACK_ALERT',
+        alertId,
+        alert_id: alertId,
       }))
     }
+    // Optimistically remove alert from feed
     setAlerts(prev => prev.filter(a => a.alertId !== alertId && (a as any).alert_id !== alertId))
   }
 
@@ -153,6 +209,7 @@ export function useTrustScore(sessionId: string) {
     raw,
     alerts,
     status,
+    codeSync,
     acknowledgeAlert
   }
 }

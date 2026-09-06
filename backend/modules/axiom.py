@@ -82,13 +82,14 @@ def axiom_fusion_engine(
     alerts: List[Dict] = []
 
     # --- Thresholds (per-session from enrollment) ---
-    tau = thresholds.get('pce_tau', thresholds.get('pce_threshold', 6.0))
-    if tau > 15.0:
-        # Standardize uncompressed photo default (60.0) for compressed 320x240 video stream
-        tau = 6.0
+    tau = thresholds.get('pce_tau', thresholds.get('pce_threshold', 45.0))
+    if tau < 25.0:
+        tau = 45.0
+    elif tau > 80.0:
+        tau = 60.0
 
     beta = thresholds.get('snr_beta', 2.0)
-    if beta > 2.5:
+    if beta < 1.0:
         beta = 2.0
 
     gamma = thresholds.get('jitter_gamma', 0.85)
@@ -102,7 +103,7 @@ def axiom_fusion_engine(
         prnu_penalty = 30.0 * (1.0 - min(pce / tau, 1.0))
         T -= prnu_penalty
 
-        if pce < tau * 0.4:
+        if pce < tau * 0.5:
             aid = str(uuid.uuid4())
             ts = datetime.utcnow().isoformat()
             msg = f'Camera fingerprint mismatch: PCE={pce:.1f} (threshold={tau:.1f})'

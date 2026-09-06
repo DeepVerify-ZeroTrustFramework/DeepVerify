@@ -54,12 +54,21 @@ async def publish_alert(session_id: str, alert: dict):
     await r.publish(channel, json.dumps(alert))
 
 
+async def publish_code_update(session_id: str, data: dict):
+    """Publish real-time code editor and compiler update to session code channel."""
+    import json
+    r = get_redis()
+    channel = f"code:{session_id}"
+    await r.publish(channel, json.dumps(data))
+
+
 async def get_pubsub(session_id: str):
-    """Create a pub/sub subscriber for a session's trust score and alerts."""
+    """Create a pub/sub subscriber for a session's trust score, alerts, and code channel."""
     r = get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe(
         f"trust_score:{session_id}",
         f"alerts:{session_id}",
+        f"code:{session_id}",
     )
     return pubsub

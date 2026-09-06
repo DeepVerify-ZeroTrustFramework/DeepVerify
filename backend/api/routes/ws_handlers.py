@@ -22,6 +22,18 @@ _candidate_connections: Dict[str, WebSocket] = {}
 # Telemetry state per session (in-memory for speed)
 _session_telemetry: Dict[str, dict] = {}
 
+# Code editor state per session
+_session_code: Dict[str, dict] = {}
+
+
+def get_session_code(session_id: str) -> dict:
+    """Get latest code state for a session."""
+    return _session_code.get(session_id, {
+        "code": "",
+        "language": "python",
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+
 
 def _get_telemetry(session_id: str) -> dict:
     """Get or create telemetry state for a session."""
@@ -41,6 +53,11 @@ def _get_telemetry(session_id: str) -> dict:
             "last_hr_bpm": 72.0,
             "face_count": 1,
             "camera_active": True,
+            "virtual_camera_detected": False,
+            "acknowledged_alerts": [],
+            "prnu_excused": False,
+            "rppg_excused": False,
+            "jitter_excused": False,
             "_gaze_alert_cooldown": 0,
             "_multiface_alert_cooldown": 0,
             "_absence_alert_cooldown": 0,
@@ -53,20 +70,163 @@ def _get_telemetry(session_id: str) -> dict:
 
 async def _get_session_thresholds(session_id: str) -> dict:
     """Load per-candidate thresholds from MongoDB."""
-    collection = get_sessions_collection()
-    doc = await collection.find_one({"session_id": session_id})
-    if not doc:
+    try:
+        collection = get_sessions_collection()
+        doc = await collection.find_one({"session_id": session_id})
+        if not doc:
+            return {"pce_tau": 60.0, "snr_beta": 3.0, "jitter_gamma": 0.15}
+        thresholds = doc.get("thresholds", {})
+        enrollment = doc.get("enrollment", {})
+        if enrollment.get("snr_baseline"):
+            thresholds["snr_beta"] = enrollment["snr_baseline"]
+        if "pce_tau" not in thresholds or thresholds.get("pce_tau", 0) < 25.0:
+            thresholds["pce_tau"] = 45.0
+        return thresholds
+    except Exception:
         return {"pce_tau": 60.0, "snr_beta": 3.0, "jitter_gamma": 0.15}
-    thresholds = doc.get("thresholds", {})
-    enrollment = doc.get("enrollment", {})
-    if enrollment.get("snr_baseline"):
-        thresholds["snr_beta"] = enrollment["snr_baseline"]
-    return thresholds
+
+
+async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Optional[dict] = None) -> dict:
+    """
+    When an interviewer acknowledges an anomaly/issue, it is marked as a False Positive / Excused.
+    This function reverses the score penalty, decrements anomaly counters, recalculates the
+    multi-modal trust score, and broadcasts the restored score to the dashboard.
+    """
+    telemetry = _get_telemetry(session_id)
+    ack_list = telemetry.setdefault("acknowledged_alerts", [])
+    if alert_id not in ack_list:
+        ack_list.append(alert_id)
+
+    alert_type = ""
+    module_name = ""
+    if alert_doc:
+        alert_type = (alert_doc.get("alert_type") or alert_doc.get("alertType") or "").upper()
+        module_name = (alert_doc.get("module") or "").upper()
+
+    # Decrement specific violation counts
+    if "FACE" in alert_type or "FACE" in alert_id.upper():
+        telemetry["multi_faces_5min"] = max(0, telemetry.get("multi_faces_5min", 0) - 1)
+    elif "PROHIBITED" in alert_type or "OBJECT" in alert_type or "OBJ" in alert_id.upper() or "PHONE" in alert_type:
+        telemetry["prohibited_objects_5min"] = max(0, telemetry.get("prohibited_objects_5min", 0) - 1)
+    elif "ABSEN" in alert_type or "ABSENCE" in alert_id.upper():
+        telemetry["absences_5min"] = max(0, telemetry.get("absences_5min", 0) - 1)
+    elif "MONITOR" in alert_type or "SCREEN" in alert_type:
+        telemetry["multi_monitors_5min"] = max(0, telemetry.get("multi_monitors_5min", 0) - 1)
+    elif "CLIPBOARD" in alert_type or "PASTE" in alert_type:
+        telemetry["large_pastes_5min"] = max(0, telemetry.get("large_pastes_5min", 0) - 1)
+    elif "TAB" in alert_type or "BLUR" in alert_type or "SWITCH" in alert_type:
+        telemetry["tab_switches_5min"] = max(0, telemetry.get("tab_switches_5min", 0) - 1)
+    elif "GAZE" in alert_type or "EYE" in alert_type:
+        telemetry["gaze_deltas"] = telemetry.get("gaze_deltas", [])[:-15]
+        telemetry["yaw_readings"] = telemetry.get("yaw_readings", [])[:-10]
+    elif "VIRTUAL" in alert_type or "OBS" in alert_type:
+        telemetry["virtual_camera_detected"] = False
+
+    if module_name == "PRNU" or "FINGERPRINT" in alert_type or "PRNU" in alert_type or "PRNU" in alert_id.upper():
+        telemetry["prnu_excused"] = True
+    elif module_name == "RPPG" or "PULSE" in alert_type or "LIVENESS" in alert_type or "RPPG" in alert_type:
+        telemetry["rppg_excused"] = True
+    elif module_name == "JITTER" or "RENDERING" in alert_type or "CADENCE" in alert_type or "JITTER" in alert_type:
+        telemetry["jitter_excused"] = True
+
+    # Recalculate score immediately
+    thresholds = await _get_session_thresholds(session_id)
+    from modules.behavioral import compute_behavioral_score
+    behavioral_score = compute_behavioral_score(telemetry, {
+        "lambda_gaze": thresholds.get("behavioral_lambda", 0.22),
+    })
+
+    pce_val = telemetry["last_pce"]
+    if telemetry.get("prnu_excused"):
+        pce_val = max(pce_val, thresholds.get("pce_tau", 60.0) + 5.0)
+
+    snr_val = telemetry["last_snr_rppg"]
+    if telemetry.get("rppg_excused"):
+        snr_val = max(snr_val, thresholds.get("snr_beta", 3.0) + 1.0)
+
+    cv_val = telemetry["last_cv_jitter"]
+    if telemetry.get("jitter_excused"):
+        cv_val = min(cv_val, thresholds.get("jitter_gamma", 0.15) * 0.5)
+
+    cam_active = telemetry.get("camera_active", True)
+    if telemetry.get("virtual_camera_detected", False):
+        cam_active = False
+
+    result = axiom_fusion_engine(
+        pce=pce_val,
+        snr_rppg=snr_val,
+        cv_jitter=cv_val,
+        behavioral_score=behavioral_score,
+        thresholds=thresholds,
+        camera_active=cam_active,
+    )
+
+    # Filter out acknowledged alerts from list
+    ack_set = set(telemetry.get("acknowledged_alerts", []))
+    result["alerts"] = [
+        a for a in result.get("alerts", [])
+        if a.get("alert_id") not in ack_set and a.get("alertId") not in ack_set
+    ]
+
+    trust_update = {
+        "type": "TRUST_UPDATE",
+        "trust_score": result["trust_score"],
+        "breakdown": result["breakdown"],
+        "raw": {
+            "pce": pce_val,
+            "snr_rppg": snr_val,
+            "cv_jitter": cv_val,
+            "behavioral_score": behavioral_score,
+            "hr_bpm": telemetry["last_hr_bpm"],
+            "face_count": telemetry.get("face_count", 1),
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    await _push_to_dashboard(session_id, trust_update)
+
+    # Publish ALERT_ACKNOWLEDGED event to alert channel
+    await publish_alert(session_id, {
+        "type": "ALERT_ACKNOWLEDGED",
+        "alert_id": alert_id,
+        "alertId": alert_id,
+        "new_score": result["trust_score"],
+        "breakdown": result["breakdown"],
+    })
+
+    # Store updated telemetry in mongo
+    try:
+        telemetry_col = get_telemetry_collection()
+        await telemetry_col.insert_one({
+            "session_id": session_id,
+            "timestamp": datetime.utcnow(),
+            "trust_score": result["trust_score"],
+            "breakdown": result["breakdown"],
+            "raw": trust_update["raw"],
+            "reverted_alert_id": alert_id,
+        })
+    except Exception:
+        pass
+
+    return result
 
 
 async def _push_to_dashboard(session_id: str, message: dict):
     """Publish a message to the connected interviewer dashboard via Redis."""
     if message.get("type") == "ALERT":
+        try:
+            alerts_col = get_alerts_collection()
+            alert_id = message.get("alertId") or message.get("alert_id")
+            existing = await alerts_col.find_one({"$or": [{"alertId": alert_id}, {"alert_id": alert_id}]})
+            if not existing:
+                await alerts_col.insert_one({
+                    "session_id": session_id,
+                    "acknowledged": False,
+                    **message,
+                })
+        except Exception as err:
+            print(f"[Alert DB Insert Error]: {err}")
+
         await publish_alert(session_id, message)
     else:
         await publish_trust_score(session_id, message)
@@ -395,6 +555,41 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 }
                 await _push_to_dashboard(session_id, alert_msg)
 
+            elif msg_type == "CODE_CHANGE":
+                code_content = msg.get("code", "")
+                code_lang = msg.get("language", "python")
+                _session_code[session_id] = {
+                    "code": code_content,
+                    "language": code_lang,
+                    "timestamp": timestamp.isoformat(),
+                }
+                from db.redis_client import publish_code_update
+                await publish_code_update(session_id, {
+                    "type": "CODE_CHANGE",
+                    "code": code_content,
+                    "language": code_lang,
+                    "timestamp": timestamp.isoformat(),
+                })
+                continue
+
+            elif msg_type == "VIRTUAL_CAMERA_DETECTED":
+                dev_name = msg.get("device", "Virtual Camera / OBS")
+                telemetry["virtual_camera_detected"] = True
+                alert_msg = {
+                    "type": "ALERT",
+                    "alertId": f"vircam-{timestamp.timestamp():.0f}",
+                    "alertType": "VIRTUAL_CAMERA_DETECTED",
+                    "module": "CAMERA",
+                    "severity": "CRITICAL",
+                    "description": f"Virtual camera / OBS video feed detected: {dev_name}",
+                    "value": 1.0,
+                    "timestamp": timestamp.isoformat(),
+                }
+                await _push_to_dashboard(session_id, alert_msg)
+
+            elif msg_type == "VIRTUAL_CAMERA_RESOLVED":
+                telemetry["virtual_camera_detected"] = False
+
             elif msg_type in ("CAMERA_STATUS", "MEDIA_STATUS"):
                 cam_active = bool(msg.get("enabled", msg.get("video_enabled", True)))
                 telemetry["camera_active"] = cam_active
@@ -421,23 +616,46 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 "lambda_gaze": thresholds.get("behavioral_lambda", 0.22),
             })
 
+            pce_val = telemetry["last_pce"]
+            if telemetry.get("prnu_excused"):
+                pce_val = max(pce_val, thresholds.get("pce_tau", 60.0) + 5.0)
+
+            snr_val = telemetry["last_snr_rppg"]
+            if telemetry.get("rppg_excused"):
+                snr_val = max(snr_val, thresholds.get("snr_beta", 3.0) + 1.0)
+
+            cv_val = telemetry["last_cv_jitter"]
+            if telemetry.get("jitter_excused"):
+                cv_val = min(cv_val, thresholds.get("jitter_gamma", 0.15) * 0.5)
+
+            cam_active = telemetry.get("camera_active", True)
+            if telemetry.get("virtual_camera_detected", False):
+                cam_active = False
+
             result = axiom_fusion_engine(
-                pce=telemetry["last_pce"],
-                snr_rppg=telemetry["last_snr_rppg"],
-                cv_jitter=telemetry["last_cv_jitter"],
+                pce=pce_val,
+                snr_rppg=snr_val,
+                cv_jitter=cv_val,
                 behavioral_score=behavioral_score,
                 thresholds=thresholds,
-                camera_active=telemetry.get("camera_active", True),
+                camera_active=cam_active,
             )
+
+            # Filter out acknowledged alerts so they do not continuously re-alert
+            ack_set = set(telemetry.get("acknowledged_alerts", []))
+            result["alerts"] = [
+                a for a in result.get("alerts", [])
+                if a.get("alert_id") not in ack_set and a.get("alertId") not in ack_set
+            ]
 
             trust_update = {
                 "type": "TRUST_UPDATE",
                 "trust_score": result["trust_score"],
                 "breakdown": result["breakdown"],
                 "raw": {
-                    "pce": telemetry["last_pce"],
-                    "snr_rppg": telemetry["last_snr_rppg"],
-                    "cv_jitter": telemetry["last_cv_jitter"],
+                    "pce": pce_val,
+                    "snr_rppg": snr_val,
+                    "cv_jitter": cv_val,
                     "behavioral_score": behavioral_score,
                     "hr_bpm": telemetry["last_hr_bpm"],
                     "face_count": telemetry.get("face_count", 1),

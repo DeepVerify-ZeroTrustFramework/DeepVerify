@@ -4,12 +4,13 @@ import {
   ShieldCheck, Loader2, Code2, AlertCircle, Clock, AlertTriangle,
   Monitor, Users, Smartphone, Maximize2, Minimize2, Camera,
   CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home,
-  Mic, MicOff, Video, VideoOff, Eye, EyeOff
+  Mic, MicOff, Video, VideoOff, Eye, EyeOff, Play, Terminal, Check
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { useBehavioralSocket } from '../hooks/useBehavioralSocket'
 import { getWsUrl } from '../utils/apiConfig'
+import { checkActiveTrackForVirtual, findPhysicalVideoDevices } from '../utils/deviceCheck'
 import GazeCapturer from '../components/GazeCapturer'
 import type { GazeData } from '../components/GazeCapturer'
 import ObjectDetector from '../components/ObjectDetector'
@@ -68,9 +69,19 @@ export default function CandidateSession() {
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
 
-  // Editor state
+  // Editor & Compiler state
   const [selectedLang, setSelectedLang] = useState('Python')
   const [editorCode, setEditorCode] = useState(LANGUAGE_TEMPLATES['Python'].template)
+  const [isRunningCode, setIsRunningCode] = useState(false)
+  const [codeOutput, setCodeOutput] = useState<{ stdout: string; stderr: string; executionTime?: number; status?: string } | null>(null)
+  const [showTerminal, setShowTerminal] = useState(false)
+  const codeDebounceRef = useRef<any>(null)
+
+  // Virtual Camera / OBS detection
+  const [virtualCamBlocked, setVirtualCamBlocked] = useState(false)
+  const [virtualCamName, setVirtualCamName] = useState('')
+  const [physicalDevices, setPhysicalDevices] = useState<MediaDeviceInfo[]>([])
+  const [switchingCam, setSwitchingCam] = useState(false)
 
   // Timer
   const [elapsed, setElapsed] = useState(0)
@@ -529,10 +540,132 @@ export default function CandidateSession() {
     }
   }
 
+  // Check stream for virtual camera
+  const checkStreamForVirtualCamera = useCallback(async (stream: MediaStream | null) => {
+    if (!stream) return true
+    const videoTracks = stream.getVideoTracks()
+    for (const track of videoTracks) {
+      const { isVirtual, name } = checkActiveTrackForVirtual(track)
+      if (isVirtual) {
+        setVirtualCamBlocked(true)
+        setVirtualCamName(name || 'OBS / Virtual Camera')
+        track.enabled = false
+        telemetryRef.current?.sendEvent('VIRTUAL_CAMERA_DETECTED', { device: name || 'OBS / Virtual Camera' })
+        const physicals = await findPhysicalVideoDevices()
+        setPhysicalDevices(physicals)
+        return false
+      }
+    }
+    return true
+  }, [])
+
+  // Monitor device change and continuous track inspection
+  useEffect(() => {
+    if (!localStream) return
+    checkStreamForVirtualCamera(localStream)
+
+    const onDeviceChange = async () => {
+      if (localStream && camEnabledRef.current) {
+        await checkStreamForVirtualCamera(localStream)
+      }
+    }
+    navigator.mediaDevices?.addEventListener('devicechange', onDeviceChange)
+
+    const interval = setInterval(() => {
+      if (localStream && camEnabledRef.current) {
+        checkStreamForVirtualCamera(localStream)
+      }
+    }, 2500)
+
+    return () => {
+      navigator.mediaDevices?.removeEventListener('devicechange', onDeviceChange)
+      clearInterval(interval)
+    }
+  }, [localStream, checkStreamForVirtualCamera])
+
+  const handleSelectPhysicalCamera = async (deviceId?: string) => {
+    setSwitchingCam(true)
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: deviceId ? { deviceId: { exact: deviceId } } : true,
+        audio: true,
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      const { isVirtual, name } = checkActiveTrackForVirtual(stream.getVideoTracks()[0])
+      if (isVirtual) {
+        stream.getTracks().forEach((t) => t.stop())
+        alert(`Selected camera "${name}" is also a virtual camera. Please select a physical webcam.`)
+        return
+      }
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop())
+      }
+      setLocalStream(stream)
+      setVirtualCamBlocked(false)
+      setVirtualCamName('')
+      telemetryRef.current?.sendEvent('VIRTUAL_CAMERA_RESOLVED', {})
+    } catch (err: any) {
+      alert('Unable to access camera: ' + (err.message || 'Permission denied'))
+    } finally {
+      setSwitchingCam(false)
+    }
+  }
+
+  // Broadcast code to interviewer (debounced)
+  const broadcastCodeChange = useCallback((newCode: string, lang: string) => {
+    if (codeDebounceRef.current) clearTimeout(codeDebounceRef.current)
+    codeDebounceRef.current = setTimeout(() => {
+      telemetryRef.current?.sendEvent('CODE_CHANGE', {
+        code: newCode,
+        language: LANGUAGE_TEMPLATES[lang]?.lang || lang.toLowerCase(),
+      })
+    }, 150)
+  }, [])
+
+  const handleEditorCodeChange = (value: string | undefined) => {
+    const val = value || ''
+    setEditorCode(val)
+    broadcastCodeChange(val, selectedLang)
+  }
+
   // Language change handler
   const handleLanguageChange = (lang: string) => {
     setSelectedLang(lang)
-    setEditorCode(LANGUAGE_TEMPLATES[lang].template)
+    const newTemplate = LANGUAGE_TEMPLATES[lang].template
+    setEditorCode(newTemplate)
+    broadcastCodeChange(newTemplate, lang)
+  }
+
+  const handleRunCode = async () => {
+    if (!session?.session_id || isRunningCode) return
+    setIsRunningCode(true)
+    setShowTerminal(true)
+    try {
+      const res = await fetch('/api/compiler/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.session_id,
+          code: editorCode,
+          language: LANGUAGE_TEMPLATES[selectedLang].lang,
+        }),
+      })
+      const data = await res.json()
+      setCodeOutput({
+        stdout: data.stdout || '',
+        stderr: data.stderr || '',
+        executionTime: data.execution_time,
+        status: data.status,
+      })
+    } catch (err: any) {
+      setCodeOutput({
+        stdout: '',
+        stderr: err.message || 'Execution request failed',
+        status: 'ERROR',
+      })
+    } finally {
+      setIsRunningCode(false)
+    }
   }
 
   if (loading) {
@@ -817,24 +950,57 @@ export default function CandidateSession() {
         </div>
 
         {/* Right: Code Editor with Monaco */}
-        <div className="w-[450px] border-l border-[#1A1A1A] bg-[#11131A] flex flex-col">
+        <div className="w-[480px] border-l border-[#1A1A1A] bg-[#11131A] flex flex-col">
           {/* Editor Header */}
-          <div className="h-12 border-b border-[#1A1A1A] flex items-center justify-between px-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
-              <Code2 size={16} className="text-blue-400" />
-              Shared Workspace (Clipboard Protected)
+          <div className="h-12 border-b border-[#1A1A1A] flex items-center justify-between px-3 bg-[#0E1017]">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
+              <Code2 size={15} className="text-blue-400" />
+              <span>Workspace</span>
             </div>
-            <select
-              value={selectedLang}
-              onChange={(e) => handleLanguageChange(e.target.value)}
-              className="bg-[#0A0A0A] border border-[#333] rounded px-2 py-1 text-xs text-gray-300 outline-none cursor-pointer"
-            >
-              {Object.keys(LANGUAGE_TEMPLATES).map((lang) => (
-                <option key={lang} value={lang}>
-                  {lang}
-                </option>
-              ))}
-            </select>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedLang}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                className="bg-[#181A22] border border-[#2D313E] rounded-lg px-2.5 py-1 text-xs text-gray-200 outline-none cursor-pointer hover:border-gray-500 transition-colors"
+              >
+                {Object.keys(LANGUAGE_TEMPLATES).map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleRunCode}
+                disabled={isRunningCode || !faceVerified}
+                className="flex items-center gap-1.5 px-3 py-1 bg-[#1A6B3C] hover:bg-[#145530] text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
+                title="Compile and Run Code"
+              >
+                {isRunningCode ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>Running...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play size={12} className="fill-white" />
+                    <span>Run</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => setShowTerminal(!showTerminal)}
+                className={`p-1.5 rounded-lg border transition-colors flex items-center gap-1 text-xs ${
+                  showTerminal ? 'bg-blue-900/30 border-blue-500/50 text-blue-300' : 'bg-[#181A22] border-[#2D313E] text-gray-400 hover:text-white'
+                }`}
+                title="Toggle Terminal Output"
+              >
+                <Terminal size={13} />
+                {codeOutput && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+              </button>
+            </div>
           </div>
 
           {/* Monaco Editor */}
@@ -860,7 +1026,7 @@ export default function CandidateSession() {
               height="100%"
               language={LANGUAGE_TEMPLATES[selectedLang].lang}
               value={editorCode}
-              onChange={(value) => setEditorCode(value || '')}
+              onChange={handleEditorCodeChange}
               theme="vs-dark"
               onMount={(editor, monaco) => {
                 // Intercept and disable Paste Command
@@ -922,6 +1088,67 @@ export default function CandidateSession() {
               }}
             />
           </div>
+
+          {/* Collapsible Terminal Output Pane */}
+          {showTerminal && (
+            <div className="h-48 border-t border-[#232736] bg-[#0A0C10] flex flex-col font-mono text-xs animate-fade-in shrink-0">
+              <div className="h-7 border-b border-[#1E232E] px-3 flex items-center justify-between bg-[#11141D] text-[11px] text-gray-400">
+                <div className="flex items-center gap-2">
+                  <Terminal size={12} className="text-emerald-400" />
+                  <span className="font-semibold text-gray-200">Terminal Output</span>
+                  {codeOutput?.status && (
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                      codeOutput.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
+                    }`}>
+                      {codeOutput.status}
+                    </span>
+                  )}
+                  {codeOutput?.executionTime !== undefined && (
+                    <span className="text-[10px] text-gray-500">
+                      ({codeOutput.executionTime}s)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCodeOutput(null)}
+                    className="text-gray-400 hover:text-white text-[10px] cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setShowTerminal(false)}
+                    className="text-gray-400 hover:text-white cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 p-3 overflow-y-auto font-mono text-[12px] leading-relaxed select-text bg-[#090A0F]">
+                {isRunningCode ? (
+                  <div className="flex items-center gap-2 text-gray-400 py-2">
+                    <Loader2 size={14} className="animate-spin text-emerald-400" />
+                    <span>Compiling and executing code in sandbox...</span>
+                  </div>
+                ) : codeOutput ? (
+                  <div>
+                    {codeOutput.stdout && (
+                      <pre className="text-emerald-300 whitespace-pre-wrap font-mono">{codeOutput.stdout}</pre>
+                    )}
+                    {codeOutput.stderr && (
+                      <pre className="text-red-400 whitespace-pre-wrap mt-1 font-mono">{codeOutput.stderr}</pre>
+                    )}
+                    {!codeOutput.stdout && !codeOutput.stderr && (
+                      <span className="text-gray-500 italic">Program finished with no stdout output.</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-500 italic">Click 'Run' to execute. Terminal output is mirrored to the interviewer in real-time.</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Telemetry Strip */}
           <div className="h-10 border-t border-[#1A1A1A] bg-[#0A0A0A] flex items-center px-4 gap-4 text-[10px] font-mono text-gray-500 tracking-wider">
@@ -1229,6 +1456,72 @@ export default function CandidateSession() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mid-Stream Virtual Camera / OBS Security Blocker Modal ── */}
+      {virtualCamBlocked && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-[#141416] border-2 border-red-600 rounded-3xl max-w-lg w-full p-8 text-center shadow-2xl shadow-red-950/80 flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-4 text-red-500">
+              <Camera size={32} />
+            </div>
+
+            <h2 className="text-xl font-bold text-white mb-2">
+              Unauthorized Video Source Detected
+            </h2>
+
+            <p className="text-xs text-red-400 font-semibold mb-4 bg-red-950/40 border border-red-900/60 px-3 py-1.5 rounded-xl font-mono">
+              Prohibited: {virtualCamName || 'OBS / Virtual Camera'}
+            </p>
+
+            <p className="text-xs text-gray-300 mb-6 leading-relaxed">
+              DeepVerify zero-trust proctoring requires direct raw sensor access for PRNU hardware fingerprinting and biological liveness. Virtual cameras, OBS loopbacks, and synthetic software feeds are strictly prohibited.
+            </p>
+
+            <div className="w-full space-y-3 mb-6">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-left">
+                Available Physical Webcams
+              </p>
+              {physicalDevices.length > 0 ? (
+                <div className="space-y-2">
+                  {physicalDevices.map((dev) => (
+                    <button
+                      key={dev.deviceId}
+                      onClick={() => handleSelectPhysicalCamera(dev.deviceId)}
+                      disabled={switchingCam}
+                      className="w-full p-3 rounded-xl bg-[#1E2026] hover:bg-[#282B34] border border-[#30333E] text-white text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <span className="truncate">{dev.label || 'Physical Webcam'}</span>
+                      <Check size={14} className="text-emerald-400 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-black/40 border border-gray-800 text-gray-400 text-xs">
+                  No physical webcam detected. Please plug in or enable your physical camera hardware.
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => handleSelectPhysicalCamera()}
+              disabled={switchingCam}
+              className="w-full py-3 bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-[#A4123F]/30 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {switchingCam ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Connecting to Physical Webcam...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={14} />
+                  <span>Scan & Connect to Hardware Camera</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}

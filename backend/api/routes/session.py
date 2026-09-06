@@ -11,7 +11,7 @@ from models.schemas import (
     ConsentRecord, SystemCheckResult, SessionStatus, SessionThresholds,
     StatusUpdate, SessionStatusResponse, SessionModules, NetworkBaseline
 )
-from db.mongo import get_sessions_collection
+from db.mongo import get_sessions_collection, get_invitations_collection
 
 router = APIRouter()
 
@@ -197,6 +197,13 @@ async def update_session(session_id: str, update: StatusUpdate):
         if update.status == SessionStatus.FLAGGED:
             update_fields["flagged_for_review"] = True
             update_fields["flagged_at"] = datetime.utcnow()
+
+        # Keep invitations collection strictly synchronized
+        invitations_col = get_invitations_collection()
+        await invitations_col.update_many(
+            {"session_id": session_id},
+            {"$set": {"status": update.status.value}}
+        )
 
     if update.check_completed is not None:
         update_fields["check_completed"] = update.check_completed

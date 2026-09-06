@@ -8,7 +8,8 @@ import json
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from db.redis_client import get_pubsub
-from db.mongo import get_sessions_collection, get_telemetry_collection, get_alerts_collection
+from db.mongo import get_sessions_collection, get_telemetry_collection, get_alerts_collection, get_invitations_collection
+from api.routes.ws_handlers import get_session_code, revert_anomaly_penalty
 
 router = APIRouter()
 
@@ -92,6 +93,14 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
             "alerts": list(reversed(existing_alerts)),
         })
 
+    # Send current code editor state if candidate has already typed code
+    curr_code = get_session_code(session_id)
+    if curr_code and curr_code.get("code"):
+        await websocket.send_json({
+            "type": "CODE_CHANGE",
+            **curr_code,
+        })
+
     # Subscribe to Redis pub/sub for real-time updates
     pubsub = await get_pubsub(session_id)
 
@@ -147,8 +156,14 @@ async def _listen_redis(pubsub, websocket: WebSocket, session_id: str):
                         "type": msg_type,
                         **parsed,
                     })
+                elif f'code:{session_id}' in channel:
+                    msg_type = parsed.get("type", "CODE_CHANGE")
+                    await websocket.send_json({
+                        "type": msg_type,
+                        **parsed,
+                    })
 
-            await asyncio.sleep(0.1)  # Small delay to prevent tight loop
+            await asyncio.sleep(0.05)  # Responsive socket forwarding
     except (WebSocketDisconnect, Exception):
         pass
 
@@ -158,7 +173,7 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
     try:
         while True:
             data = await websocket.receive_json()
-            command = data.get('command', '')
+            command = data.get('command', '') or data.get('type', '')
 
             if command == 'FLAG_SESSION':
                 collection = get_sessions_collection()
@@ -179,20 +194,46 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
                     {"session_id": session_id},
                     {"$set": {"status": "COMPLETED", "end_time": datetime.utcnow()}}
                 )
+                # Synchronize status to invitations so candidate inbox is cleaned
+                invitations_col = get_invitations_collection()
+                await invitations_col.update_many(
+                    {"session_id": session_id},
+                    {"$set": {"status": "COMPLETED"}}
+                )
                 await websocket.send_json({
                     "type": "COMMAND_ACK",
                     "command": "END_SESSION",
                     "message": "Session ended",
                 })
 
-            elif command == 'ACK_ALERT':
-                alert_id = data.get('alert_id')
+            elif command in ('ACK_ALERT', 'ACKNOWLEDGE_ALERT'):
+                alert_id = data.get('alert_id') or data.get('alertId')
                 if alert_id:
+                    from datetime import datetime
                     alerts_col = get_alerts_collection()
-                    await alerts_col.update_one(
-                        {"alert_id": alert_id},
-                        {"$set": {"acknowledged": True}}
+                    alert_doc = await alerts_col.find_one({
+                        "$or": [{"alert_id": alert_id}, {"alertId": alert_id}]
+                    })
+                    await alerts_col.update_many(
+                        {"$or": [{"alert_id": alert_id}, {"alertId": alert_id}]},
+                        {"$set": {
+                            "acknowledged": True,
+                            "status": "EXCUSED",
+                            "acknowledged_at": datetime.utcnow().isoformat(),
+                        }}
                     )
+
+                    # Revert anomaly penalty and recalculate live trust score
+                    rev_result = await revert_anomaly_penalty(session_id, alert_id, alert_doc)
+
+                    await websocket.send_json({
+                        "type": "COMMAND_ACK",
+                        "command": "ACK_ALERT",
+                        "alert_id": alert_id,
+                        "alertId": alert_id,
+                        "new_score": rev_result.get("trust_score"),
+                        "message": "Anomaly excused as false positive — penalty score refunded",
+                    })
 
     except (WebSocketDisconnect, Exception):
         pass
