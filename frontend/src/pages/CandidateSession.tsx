@@ -336,8 +336,9 @@ export default function CandidateSession() {
     }
   }, [session?.session_id, localStream])
 
-  // Fullscreen state
+  // Fullscreen & Tab Focus states
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showTabWarning, setShowTabWarning] = useState(false)
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -359,9 +360,17 @@ export default function CandidateSession() {
         addViolationToast('Exited Fullscreen mode — integrity warning logged.', 'FULLSCREEN')
       }
     }
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        addViolationToast('Tab switched or minimized — integrity warning logged.', 'TAB_SWITCH')
+        setShowTabWarning(true)
+      }
+    }
     document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [addViolationToast])
 
@@ -392,6 +401,35 @@ export default function CandidateSession() {
       rtc.stop()
     }
   }, [session, localStream])
+
+  // Session completion polling (Interviewer ends session)
+  useEffect(() => {
+    if (!session || isEnded) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/sessions/by-token/${token}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.status === 'COMPLETED') {
+            setIsEnded(true)
+            if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
+            if (frameWsRef.current) {
+              try { frameWsRef.current.close() } catch {}
+            }
+            if (timerRef.current) clearInterval(timerRef.current)
+            if (localStream) {
+              localStream.getTracks().forEach(t => t.stop())
+            }
+            rtc.stop()
+            setShowEndModal(false)
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [session, isEnded, token, localStream, rtc])
 
   // Track real suspicious actions for telemetry degradation
   const suspicionRef = useRef({ tabSwitches: 0, pastes: 0, blurTime: 0, lastBlur: 0 })
@@ -739,7 +777,48 @@ export default function CandidateSession() {
   }
 
   return (
-    <div className="h-screen bg-[#0A0A0A] flex flex-col overflow-hidden text-white font-sans relative">
+    <>
+      {/* FULLSCREEN ENFORCEMENT OVERLAY */}
+      {!isFullscreen && (
+        <div className="fixed inset-0 z-[9999] bg-[#0A0B0E]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 mb-6 border border-amber-500/30">
+            <Maximize2 size={32} />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-4">Full Screen Required</h1>
+          <p className="text-gray-300 max-w-md mb-8 leading-relaxed">
+            This technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment.
+          </p>
+          <button
+            onClick={toggleFullscreen}
+            className="px-8 py-3 rounded-xl bg-[#A4123F] hover:bg-[#850E32] text-white font-bold transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-[#A4123F]/30"
+          >
+            <Monitor size={18} />
+            <span>Enter Full Screen to Continue</span>
+          </button>
+        </div>
+      )}
+
+      {/* TAB SWITCH WARNING OVERLAY */}
+      {showTabWarning && isFullscreen && (
+        <div className="fixed inset-0 z-[9998] bg-[#0A0B0E]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 mb-6 border border-red-500/30">
+            <AlertTriangle size={32} />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-4">Focus Lost</h1>
+          <p className="text-gray-300 max-w-md mb-8 leading-relaxed">
+            You switched tabs or minimized the window. Leaving the interview environment is strictly prohibited. This incident has been logged and flagged on your trust score.
+          </p>
+          <button
+            onClick={() => setShowTabWarning(false)}
+            className="px-8 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-600/30"
+          >
+            <Check size={18} />
+            <span>I Understand, Return to Interview</span>
+          </button>
+        </div>
+      )}
+
+      <div className="h-screen bg-[#0A0A0A] flex flex-col overflow-hidden text-white font-sans relative">
       {/* Violation Alert Toasts */}
       <div className="fixed top-16 right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-sm">
         {violations.map((v) => (
@@ -1527,5 +1606,6 @@ export default function CandidateSession() {
       )}
 
     </div>
+    </>
   )
 }
