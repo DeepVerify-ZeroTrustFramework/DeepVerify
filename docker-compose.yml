@@ -9,6 +9,7 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
       - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
     environment:
       - BACKEND_URL=http://backend:8000
       - BACKEND_WS=ws://backend:8000
