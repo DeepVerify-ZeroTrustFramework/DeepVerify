@@ -49,6 +49,8 @@ export default function RecruiterDashboard() {
   const [inviteMessage, setInviteMessage] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteSuccess, setInviteSuccess] = useState('')
+  const [inviteError, setInviteError] = useState('')
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user || user.role !== 'recruiter') {
@@ -119,7 +121,7 @@ export default function RecruiterDashboard() {
 
     setInviteLoading(true)
     setInviteSuccess('')
-    setError('')
+    setInviteError('')
 
     try {
       const res = await fetch('/api/invitations', {
@@ -149,9 +151,37 @@ export default function RecruiterDashboard() {
         setActiveTab('invitations')
       }, 1500)
     } catch (err: any) {
-      setError(err.message || 'Failed to send invite.')
+      setInviteError(err.message || 'Failed to send invite.')
     } finally {
       setInviteLoading(false)
+    }
+  }
+
+  const handleCancelInvite = async (invitationId: string) => {
+    if (!window.confirm('Are you sure you want to cancel this invitation? The candidate will no longer be able to join with this link.')) {
+      return
+    }
+    setCancellingId(invitationId)
+    setError('')
+    try {
+      const res = await fetch(`/api/invitations/${invitationId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      })
+      if (res.ok) {
+        setSentInvites((prev) =>
+          prev.map((inv) =>
+            inv.invitation_id === invitationId ? { ...inv, status: 'CANCELLED' } : inv
+          )
+        )
+      } else {
+        const data = await res.json()
+        setError(data.detail || 'Failed to cancel invitation.')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to cancel invitation.')
+    } finally {
+      setCancellingId(null)
     }
   }
 
@@ -361,9 +391,17 @@ export default function RecruiterDashboard() {
                   className="bg-white border border-[#EAEAEA] rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-[#FDF2F4] text-[#A4123F]">
                         {inv.role_title}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                        inv.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        inv.status === 'CANCELLED' ? 'bg-gray-100 text-gray-500 border border-gray-200' :
+                        inv.status === 'IN_PROGRESS' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                        'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}>
+                        {inv.status}
                       </span>
                       <span className="text-[11px] text-[#888] flex items-center gap-1">
                         <Clock size={12} /> {inv.duration} mins
@@ -383,10 +421,25 @@ export default function RecruiterDashboard() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                    {inv.status !== 'COMPLETED' && inv.status !== 'CANCELLED' && (
+                      <button
+                        onClick={() => handleCancelInvite(inv.invitation_id)}
+                        disabled={cancellingId === inv.invitation_id}
+                        className="px-3 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        title="Revoke and cancel this invitation"
+                      >
+                        {cancellingId === inv.invitation_id ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <X size={13} />
+                        )}
+                        Cancel Invite
+                      </button>
+                    )}
                     <Link
                       to={`/dashboard/${inv.session_id}`}
-                      className="px-5 py-2.5 bg-[#0F0F0F] hover:bg-[#2A2A2A] text-white text-xs font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-colors"
+                      className="px-4 py-2.5 bg-[#0F0F0F] hover:bg-[#2A2A2A] text-white text-xs font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-colors"
                     >
                       <Video size={14} />
                       Enter Forensic Dashboard
@@ -406,7 +459,11 @@ export default function RecruiterDashboard() {
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-white border border-[#EAEAEA] rounded-2xl p-6 shadow-2xl relative">
             <button
-              onClick={() => setSelectedCandidate(null)}
+              onClick={() => {
+                setSelectedCandidate(null)
+                setInviteError('')
+                setInviteSuccess('')
+              }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 p-1"
             >
               <X size={20} />
@@ -432,6 +489,16 @@ export default function RecruiterDashboard() {
               <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
                 <CheckCircle2 size={16} />
                 <span>{inviteSuccess}</span>
+              </div>
+            )}
+
+            {inviteError && (
+              <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2.5">
+                <AlertCircle size={16} className="shrink-0 text-red-600 mt-0.5" />
+                <div>
+                  <p className="font-bold text-red-900">Cannot Send Invitation</p>
+                  <p className="mt-0.5 text-red-700 leading-relaxed">{inviteError}</p>
+                </div>
               </div>
             )}
 

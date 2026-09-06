@@ -147,6 +147,24 @@ def compute_pce(W_test: np.ndarray, K_hat: np.ndarray) -> float:
     energy_rest = float(np.mean(valid_energy)) if len(valid_energy) > 0 else 1e-10
 
     pce = peak / (energy_rest + 1e-10)
+
+    # Spatial alignment verification:
+    # A true camera sensor noise pattern is physically stationary on the sensor pixel grid,
+    # so its correlation peak MUST align at or near (0, 0) in circular lag space (+- 6 pixels).
+    # If the global peak is far from (0, 0), it is a random extreme-value noise artifact.
+    dr = min(r, h - r)
+    dc = min(c, w_width - c)
+    lag_dist = np.sqrt(dr * dr + dc * dc)
+    if lag_dist > 6.0:
+        # Check local peak near sensor origin (within +- 5 pixels)
+        r_orig = np.concatenate([np.arange(0, min(6, h)), np.arange(max(0, h - 5), h)])
+        c_orig = np.concatenate([np.arange(0, min(6, w_width)), np.arange(max(0, w_width - 5), w_width)])
+        sub_orig = corr_sq[np.ix_(r_orig, c_orig)]
+        peak_orig = float(np.max(sub_orig)) if sub_orig.size > 0 else 0.0
+        pce_orig = peak_orig / (energy_rest + 1e-10)
+        # If the origin peak is authentic (> 30), use it; otherwise bound by origin alignment
+        pce = min(pce, max(pce_orig, pce * 0.5))
+
     return float(pce)
 
 
