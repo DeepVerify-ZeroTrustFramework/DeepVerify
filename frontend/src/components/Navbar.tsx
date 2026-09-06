@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ShieldCheck, User, Building2, LogOut } from 'lucide-react'
+import { ShieldCheck, User, Building2, LogOut, Film } from 'lucide-react'
 import { getAuthUser, clearAuth } from '../utils/auth'
 
 export default function Navbar() {
@@ -27,6 +27,12 @@ export default function Navbar() {
 
         {/* Right side navigation */}
         <div className="flex items-center gap-3">
+          <Link
+            to="/demo"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#FDF2F5] text-[#A4123F] text-xs font-semibold hover:bg-[#FBE8EC] transition-colors"
+          >
+            <Film size={13} /> Demo Mode
+          </Link>
           {user ? (
             <div className="flex items-center gap-3">
               {user.role === 'candidate' ? (

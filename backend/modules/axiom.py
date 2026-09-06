@@ -88,9 +88,9 @@ def axiom_fusion_engine(
     elif tau > 80.0:
         tau = 60.0
 
-    beta = thresholds.get('snr_beta', 2.0)
+    beta = thresholds.get('snr_beta', 3.0)
     if beta < 1.0:
-        beta = 2.0
+        beta = 3.0
 
     gamma = thresholds.get('jitter_gamma', 0.85)
     if gamma < 0.3:
