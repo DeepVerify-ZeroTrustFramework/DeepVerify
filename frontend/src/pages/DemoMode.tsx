@@ -366,43 +366,45 @@ export default function DemoMode() {
 
   return (
     <div className="min-h-screen bg-[#F7F7F8]">
-      {/* ── Header ── */}
-      <nav className="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-[#E4E4E6]">
-        <div className="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#A4123F] flex items-center justify-center">
-              <ShieldCheck size={18} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-[#0F0F0F] leading-tight">DeepVerify</p>
-              <p className="text-[10px] text-[#6B6B6B] leading-tight">Demo Mode — Forensic Video Analysis</p>
-            </div>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            {phase === 'ANALYZING' && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FDF2F5] border border-[#EDD0D8]">
-                <div className="w-2 h-2 rounded-full bg-[#A4123F] animate-pulse" />
-                <span className="text-[11px] font-semibold text-[#A4123F]">LIVE ANALYSIS</span>
+      {/* ── Floating glass island Navbar ── */}
+      <div className="fixed top-6 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+        <nav className="w-full max-w-[1100px] pointer-events-auto rounded-[1.25rem] bg-white/75 backdrop-blur-xl border border-white/80 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
+          <div className="px-6 h-[4.5rem] flex items-center justify-between">
+            <Link to="/" className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#A4123F] flex items-center justify-center shadow-[0_4px_12px_rgba(164,18,63,0.3)]">
+                <ShieldCheck size={20} className="text-white" />
               </div>
-            )}
-            {wsConnected && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#E6F4ED]">
-                <Zap size={12} className="text-[#1A6B3C]" />
-                <span className="text-[10px] font-semibold text-[#1A6B3C]">WS Connected</span>
+              <div>
+                <p className="text-[17px] font-bold text-[#0F0F0F] tracking-tight leading-none">DeepVerify</p>
+                <p className="text-[11px] text-[#6B6B6B] mt-0.5">Demo Mode — Forensic Video Analysis</p>
               </div>
-            )}
-            <Link
-              to="/"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#6B6B6B] hover:text-[#0F0F0F] hover:bg-[#EFEFF0] transition-colors"
-            >
-              <Home size={14} /> Home
             </Link>
-          </div>
-        </div>
-      </nav>
 
-      <div className="max-w-[1400px] mx-auto px-6 py-8">
+            <div className="flex items-center gap-3">
+              {phase === 'ANALYZING' && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FDF2F5] border border-[#EDD0D8]">
+                  <div className="w-2 h-2 rounded-full bg-[#A4123F] animate-pulse" />
+                  <span className="text-[11px] font-semibold text-[#A4123F]">LIVE ANALYSIS</span>
+                </div>
+              )}
+              {wsConnected && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#E6F4ED]">
+                  <Zap size={12} className="text-[#1A6B3C]" />
+                  <span className="text-[10px] font-semibold text-[#1A6B3C]">WS Connected</span>
+                </div>
+              )}
+              <Link
+                to="/"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#6B6B6B] hover:text-[#0F0F0F] hover:bg-black/5 transition-colors"
+              >
+                <Home size={14} /> Home
+              </Link>
+            </div>
+          </div>
+        </nav>
+      </div>
+
+      <div className="max-w-[1400px] mx-auto px-6 pt-32 pb-8">
         {/* ── Error Banner ── */}
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-[#FEE2E2] border border-[#FCA5A5] flex items-start gap-3 animate-fade-in">
