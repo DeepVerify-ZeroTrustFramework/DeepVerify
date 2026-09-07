@@ -52,8 +52,6 @@ function FormBg({ accent }: { accent: string }) {
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _REC_GRAD = 'linear-gradient(155deg, #FFFFFF 0%, #F5F5F5 100%)'
 const REC_ACCENT = '#3A3A3A'
 const REC_FOCUS = '#2A2A2A'
 
