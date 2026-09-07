@@ -21,27 +21,43 @@ function buildSignalingUrl(sessionId: string, role: string): string {
   return getWsUrl(`/ws/signaling/${sessionId}?role=${role}`)
 }
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
+const getIceServers = (): RTCIceServer[] => {
+  const servers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun.relay.metered.ca:80' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
+
+  const turnUrl = import.meta.env.VITE_TURN_URL
+  const turnUser = import.meta.env.VITE_TURN_USERNAME
+  const turnPass = import.meta.env.VITE_TURN_PASSWORD
+
+  if (turnUrl && turnUser && turnPass) {
+    // Supports comma-separated URLs e.g. "turn:domain:80,turn:domain:443"
+    const urls = turnUrl.split(',').map((u: string) => u.trim())
+    servers.push({
+      urls,
+      username: turnUser,
+      credential: turnPass
+    })
+  } else {
+    // Fallback to free public TURN (often rate-limited/unreliable in production)
+    servers.push({ urls: 'stun:stun.relay.metered.ca:80' })
+    servers.push({
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
       username: 'openrelayproject',
       credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ],
+    })
+  }
+
+  return servers
+}
+
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: getIceServers(),
 }
 
 export function useWebRTC(
