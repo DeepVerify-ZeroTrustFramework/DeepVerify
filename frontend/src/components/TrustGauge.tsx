@@ -21,7 +21,7 @@ export default function TrustGauge({ score = 100 }: { score?: number }) {
   return (
     <div className="flex flex-col items-center">
       <div className="relative w-[160px] h-[160px] mb-2" style={{ '--ring-circumference': circumference } as React.CSSProperties}>
-        <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+        <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90 drop-shadow-sm">
           <circle cx="60" cy="60" r="54" fill="none" stroke="#EFEFF0" strokeWidth="6" />
           <circle
             cx="60" cy="60" r="54" fill="none"
@@ -30,7 +30,10 @@ export default function TrustGauge({ score = 100 }: { score?: number }) {
             strokeDasharray={circumference}
             strokeDashoffset={offset}
             className="transition-all duration-700 ease-out"
-            style={{ animation: score === 100 ? 'ringStroke 1s ease-out' : 'none' }}
+            style={{ 
+              animation: score === 100 ? 'ringStroke 1s ease-out' : 'none',
+              filter: `drop-shadow(0px 2px 6px ${color}33)` 
+            }}
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">

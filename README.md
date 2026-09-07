@@ -2,6 +2,7 @@
 
 <img src="https://img.shields.io/badge/IEEE-ICOSAAS%202026-A4123F?style=for-the-badge&logo=ieee&logoColor=white" alt="IEEE ICOSAAS 2026"/>
 <img src="https://img.shields.io/badge/Status-Active%20Development-22C55E?style=for-the-badge" alt="Status"/>
+<img src="https://img.shields.io/badge/Zero%20Trust-PRNU%20%2B%20rPPG-1E40AF?style=for-the-badge" alt="Zero Trust Integrity"/>
 <img src="https://img.shields.io/badge/License-MIT-6B7280?style=for-the-badge" alt="License"/>
 
 <br/><br/>
