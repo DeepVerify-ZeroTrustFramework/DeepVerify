@@ -21,43 +21,33 @@ function buildSignalingUrl(sessionId: string, role: string): string {
   return getWsUrl(`/ws/signaling/${sessionId}?role=${role}`)
 }
 
-const getIceServers = (): RTCIceServer[] => {
-  const servers: RTCIceServer[] = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ]
-
-  const turnUrl = import.meta.env.VITE_TURN_URL
-  const turnUser = import.meta.env.VITE_TURN_USERNAME
-  const turnPass = import.meta.env.VITE_TURN_PASSWORD
-
-  if (turnUrl && turnUser && turnPass) {
-    // Supports comma-separated URLs e.g. "turn:domain:80,turn:domain:443"
-    const urls = turnUrl.split(',').map((u: string) => u.trim())
-    servers.push({
-      urls,
-      username: turnUser,
-      credential: turnPass
-    })
-  } else {
-    // Fallback to free public TURN (often rate-limited/unreliable in production)
-    servers.push({ urls: 'stun:stun.relay.metered.ca:80' })
-    servers.push({
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp'
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    })
-  }
-
-  return servers
-}
+const TURN_URL = import.meta.env.VITE_TURN_URL || 'a.relay.metered.ca'
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME || 'a0a5c6112c374af76b6ab271'
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL || 'iii1zemC2g63nllp'
 
 const ICE_CONFIG: RTCConfiguration = {
-  iceServers: getIceServers(),
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    {
+      urls: `turn:${TURN_URL}:80`,
+      username: TURN_USERNAME,
+      credential: TURN_CREDENTIAL
+    },
+    {
+      urls: `turn:${TURN_URL}:443`,
+      username: TURN_USERNAME,
+      credential: TURN_CREDENTIAL
+    },
+    {
+      urls: `turn:${TURN_URL}:443?transport=tcp`,
+      username: TURN_USERNAME,
+      credential: TURN_CREDENTIAL
+    }
+  ],
+  // Optional debugging switch: Set VITE_FORCE_TURN=true to test TURN relays exclusively
+  ...(import.meta.env.VITE_FORCE_TURN === 'true' ? { iceTransportPolicy: 'relay' } : {})
 }
 
 export function useWebRTC(
@@ -357,15 +347,18 @@ export function useWebRTC(
 
     // Send local ICE candidates to remote peer via signaling
     pc.onicecandidate = (event) => {
-      if (event.candidate && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'ice-candidate',
-          candidate: {
-            candidate: event.candidate.candidate,
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-          },
-        }))
+      if (event.candidate) {
+        console.log(`[WebRTC] ICE candidate type: ${event.candidate.type}`)
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'ice-candidate',
+            candidate: {
+              candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+            },
+          }))
+        }
       }
     }
 
