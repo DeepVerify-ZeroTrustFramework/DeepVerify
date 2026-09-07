@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Loader2, AlertCircle, Building2, BarChart3, Users, Zap, Eye, EyeOff } from 'lucide-react'
+import { ArrowRight, Loader2, AlertCircle, Building2, BarChart3, Users, Eye, EyeOff } from 'lucide-react'
 import { setAuth } from '../../utils/auth'
 import Navbar from '../../components/Navbar'
 
@@ -52,7 +52,8 @@ function FormBg({ accent }: { accent: string }) {
   )
 }
 
-const REC_GRAD = 'linear-gradient(155deg, #FFFFFF 0%, #F5F5F5 100%)'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _REC_GRAD = 'linear-gradient(155deg, #FFFFFF 0%, #F5F5F5 100%)'
 const REC_ACCENT = '#3A3A3A'
 const REC_FOCUS = '#2A2A2A'
 
