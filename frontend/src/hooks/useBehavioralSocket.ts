@@ -17,35 +17,71 @@ export function useBehavioralSocket(
     onViolationRef.current = options?.onViolation
   }, [options?.onViolation])
 
-  // Establish connection
+  // Establish connection — and keep it up. This socket carries every
+  // behavioral event (tab switch, paste, shortcuts, gaze/face presence). It used
+  // to connect once and never reconnect, so a single drop (Render proxy idle
+  // timeout, a backend restart, a network blip on the candidate's side) silently
+  // stopped ALL behavioral anomalies for the rest of the interview.
+  const queueRef = useRef<string[]>([])
   useEffect(() => {
     if (!active || !sessionId) return
 
-    const wsUrl = getWsUrl(`/ws/candidate/${sessionId}`)
+    let closed = false
+    let retry = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let pingInterval: ReturnType<typeof setInterval> | null = null
 
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
+    const connect = () => {
+      if (closed) return
+      const ws = new WebSocket(getWsUrl(`/ws/candidate/${sessionId}`))
+      wsRef.current = ws
 
-    ws.onopen = () => console.log('[Behavioral] Connected to telemetry socket')
-    ws.onclose = () => console.log('[Behavioral] Disconnected')
-    ws.onerror = (e) => console.error('[Behavioral] Socket error', e)
+      ws.onopen = () => {
+        retry = 0
+        console.log('[Behavioral] Connected to telemetry socket')
+        // Deliver events raised while we were disconnected
+        const pending = queueRef.current.splice(0)
+        for (const m of pending) ws.send(m)
+      }
+      ws.onerror = (e) => console.error('[Behavioral] Socket error', e)
+      ws.onclose = (e) => {
+        if (wsRef.current === ws) wsRef.current = null
+        if (closed) return
+        const delay = Math.min(10000, 500 * 2 ** retry++)
+        console.warn(`[Behavioral] Disconnected (code ${e.code}) — reconnecting in ${delay}ms`)
+        retryTimer = setTimeout(connect, delay)
+      }
+    }
+    connect()
 
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
+    pingInterval = setInterval(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }))
       }
-    }, 30000)
+    }, 20000)
 
     return () => {
-      clearInterval(pingInterval)
-      ws.close()
+      closed = true
+      if (pingInterval) clearInterval(pingInterval)
+      if (retryTimer) clearTimeout(retryTimer)
+      wsRef.current?.close()
+      wsRef.current = null
     }
   }, [sessionId, active])
 
-  // Send generic event
+  // Send generic event. If the socket is momentarily down, important events are
+  // queued and sent on reconnect; high-rate streams (gaze, code) are not, the
+  // next update supersedes them anyway.
   const sendEvent = useCallback((type: string, data: any = {}) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, ...data }))
+    const msg = JSON.stringify({ type, ...data })
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(msg)
+    } else if (type !== 'GAZE' && type !== 'CODE_CHANGE' && type !== 'FRAME_METRICS') {
+      const q = queueRef.current
+      q.push(msg)
+      if (q.length > 200) q.shift()
     }
   }, [])
 

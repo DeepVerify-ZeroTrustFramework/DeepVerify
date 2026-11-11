@@ -286,6 +286,11 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
     telemetry = _get_telemetry(session_id)
 
     print(f"[WS] Candidate connected for session {session_id}")
+    _fire_and_forget(_push_to_dashboard(session_id, {
+        "type": "STATUS_CHANGE",
+        "status": "CONNECTED",
+        "timestamp": datetime.utcnow().isoformat(),
+    }))
 
     try:
         while True:
@@ -754,13 +759,24 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         print(f"[WS] Candidate disconnected from session {session_id}")
+    except Exception as e:
+        # Previously any unexpected error here closed the socket silently and the
+        # candidate page never reconnected, so behavioral anomalies just stopped.
+        # The page now reconnects; log the cause so it shows up in Render logs.
+        import traceback
+        print(f"[WS] Candidate socket error in session {session_id}: {e!r}")
+        traceback.print_exc()
+    finally:
         if _candidate_connections.get(session_id) == websocket:
             del _candidate_connections[session_id]
-        await _push_to_dashboard(session_id, {
-            "type": "STATUS_CHANGE",
-            "status": "DISCONNECTED",
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        try:
+            await _push_to_dashboard(session_id, {
+                "type": "STATUS_CHANGE",
+                "status": "DISCONNECTED",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
 
 
 def _get_alert_description(alert_type: str) -> str:

@@ -137,6 +137,11 @@ class _Step:
     frontal_seen: bool = False
     consec: int = 0
     wrong_way: bool = False
+    # Same counters under the "camera image is mirrored" hypothesis (see
+    # ChallengeManager._mirror). Some laptop webcams / drivers deliver a
+    # mirrored image, which makes every correct turn look like the wrong way.
+    consec_m: int = 0
+    wrong_way_m: bool = False
     face_frames: int = 0
     rel_min: float = 0.0
     rel_max: float = 0.0
@@ -165,6 +170,12 @@ class ChallengeManager:
     _attempt: int = 0
     _yaw_hist: List[tuple] = field(default_factory=list)   # (t, yaw) last few seconds
     _base: Optional[float] = None                           # front-facing yaw at challenge start
+    # Camera orientation: None = unknown yet, False = normal, True = mirrored.
+    # Learned from the first challenge where EVERY step follows the instructions
+    # consistently in one orientation; a replayed clip can't do that for a
+    # random LEFT/RIGHT sequence, so this does not weaken the check.
+    _mirror: Optional[bool] = None
+    _hyps: tuple = (False, True)                            # orientations still consistent this challenge
 
     @property
     def enabled(self) -> bool:
@@ -203,6 +214,7 @@ class ChallengeManager:
                 break
         self._step_idx = 0
         self._base = self._baseline(now)
+        self._hyps = (False, True) if self._mirror is None else (self._mirror,)
         self.status = 'active'
         return self._issue_step(now)
 
@@ -268,14 +280,21 @@ class ChallengeManager:
             first_step = self._step_idx == 0
             if abs(rel) <= FRONTAL_MAX and (elapsed <= 2.5 or not first_step):
                 st.frontal_seen = True
-            if st.frontal_seen and -sign * rel >= WRONG_WAY and st.consec == 0:
-                st.wrong_way = True
-            if st.frontal_seen and sign * rel >= THRESH and MIN_LATENCY <= elapsed <= MAX_LATENCY + 0.3:
-                st.consec += 1
-            else:
-                st.consec = 0
-            if st.consec >= CONSEC and st.frontal_seen and not st.wrong_way:
-                return self._step_passed(now)
+            in_window = MIN_LATENCY <= elapsed <= MAX_LATENCY + 0.3
+            for mirrored in self._hyps:
+                sg = -sign if mirrored else sign
+                c_attr, w_attr = ('consec_m', 'wrong_way_m') if mirrored else ('consec', 'wrong_way')
+                if st.frontal_seen and -sg * rel >= WRONG_WAY and getattr(st, c_attr) == 0:
+                    setattr(st, w_attr, True)
+                if st.frontal_seen and sg * rel >= THRESH and in_window:
+                    setattr(st, c_attr, getattr(st, c_attr) + 1)
+                else:
+                    setattr(st, c_attr, 0)
+                if getattr(st, c_attr) >= CONSEC and st.frontal_seen and not getattr(st, w_attr):
+                    # This orientation explains the step; drop the other one so the
+                    # remaining steps must follow the SAME orientation.
+                    self._hyps = (mirrored,)
+                    return self._step_passed(now)
 
         # Live feedback for the candidate (and for debugging): ~3 times a second,
         # how far the head has turned towards the target (1.0 = enough), and
@@ -283,19 +302,19 @@ class ChallengeManager:
         if st.frames % 3 == 0:
             if yaw is not None:
                 sgn = 1.0 if st.direction == 'LEFT' else -1.0
-                prog = max(0.0, sgn * (yaw - st.baseline)) / THRESH
+                prog = max(max(0.0, (-sgn if m else sgn) * (yaw - st.baseline)) for m in self._hyps) / THRESH
             else:
                 prog = 0.0
             out.append({'type': 'LIVENESS_PROGRESS', 'challenge_id': self._challenge_id,
                         'step': self._step_idx + 1, 'face': yaw is not None,
-                        'progress': round(min(prog, 1.5), 2), 'wrong_way': bool(st.wrong_way)})
+                        'progress': round(min(prog, 1.5), 2), 'wrong_way': all(st.wrong_way_m if m else st.wrong_way for m in self._hyps)})
 
-        if elapsed >= STEP_TIMEOUT or (elapsed > MAX_LATENCY + 0.3 and st.consec == 0):
+        if elapsed >= STEP_TIMEOUT or (elapsed > MAX_LATENCY + 0.3 and st.consec == 0 and st.consec_m == 0):
             if st.face_frames == 0:
                 reason = 'no face visible during the challenge'
             elif not st.frontal_seen:
                 reason = 'face was not facing the camera when the challenge started'
-            elif st.wrong_way:
+            elif all(st.wrong_way_m if m else st.wrong_way for m in self._hyps):
                 reason = f'head turned the wrong way (asked {st.direction})'
             else:
                 reason = f'no head turn to the {st.direction} within {MAX_LATENCY:.1f}s'
@@ -311,6 +330,9 @@ class ChallengeManager:
         self._step = None
         self.status = 'passed'
         self.passes += 1
+        if self._mirror is None and len(self._hyps) == 1:
+            self._mirror = self._hyps[0]
+            print(f"[Liveness] {self.session_id} camera orientation learned: {'MIRRORED' if self._mirror else 'normal'}", flush=True)
         self._schedule_next(now)
         return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
                  'passed': True, 'message': 'Thanks — liveness check passed.'}]
