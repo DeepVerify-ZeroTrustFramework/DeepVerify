@@ -1,509 +1,490 @@
 /**
  * useWebRTC — Peer-to-peer WebRTC hook via signaling WebSocket.
  *
- * Architecture:
  *   Browser A  ←→  Signaling WS (/ws/signaling/{id})  ←→  Browser B
- *   Browser A  ←————————— WebRTC media (direct) ——————————→  Browser B
+ *   Browser A  ←——— WebRTC media + "sync" data channel (direct or via TURN) ———→  Browser B
  *
- * The candidate is always the "caller" (creates SDP offer).
- * The interviewer is always the "callee" (creates SDP answer).
+ * The candidate is always the offerer, the interviewer always the answerer.
  *
- * ICE candidates that arrive before setRemoteDescription are queued
- * and flushed once the remote description is set.
+ * Cross-network reliability:
+ *  - ICE servers (incl. TURN with short-lived credentials) are fetched from the
+ *    backend (/api/webrtc/ice-servers) so they can be rotated without a rebuild.
+ *    Two laptops on different networks / campus Wi-Fi with client isolation
+ *    CANNOT connect without a working TURN relay — only same-machine tests can.
+ *  - Every RTCPeerConnection gets a random `pcId`. Signaling messages carry it,
+ *    so a peer that refreshed/rejoined gets a brand-new connection instead of a
+ *    stale one, and late ICE candidates from an old connection are dropped.
+ *  - ICE restart on failure, signaling WS auto-reconnect.
+ *
+ * Latency:
+ *  - Receiver jitter buffer target set to 0 (playoutDelayHint / jitterBufferTarget).
+ *  - Senders prefer framerate over resolution; bitrate capped to avoid queueing.
+ *  - A negotiated data channel ("sync") lets the candidate stream editor contents
+ *    peer-to-peer, bypassing the backend entirely (see sendData / onData).
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { getWsUrl } from '../utils/apiConfig'
 
 export type WebRTCState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error'
 
-// Build the signaling WS URL relative to current page
 function buildSignalingUrl(sessionId: string, role: string): string {
   return getWsUrl(`/ws/signaling/${sessionId}?role=${role}`)
 }
 
-const TURN_URL = import.meta.env.VITE_TURN_URL || 'a.relay.metered.ca'
-const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME || 'a0a5c6112c374af76b6ab271'
-const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL || 'iii1zemC2g63nllp'
+// ── Fallback ICE config (used only if the backend endpoint is unreachable) ──
+const TURN_URL = import.meta.env.VITE_TURN_URL || ''
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME || ''
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL || ''
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun.relay.metered.ca:80' },
-    {
-      urls: `turn:${TURN_URL}:80`,
-      username: TURN_USERNAME,
-      credential: TURN_CREDENTIAL
-    },
-    {
-      urls: `turn:${TURN_URL}:443`,
-      username: TURN_USERNAME,
-      credential: TURN_CREDENTIAL
-    },
-    {
-      urls: `turn:${TURN_URL}:443?transport=tcp`,
-      username: TURN_USERNAME,
-      credential: TURN_CREDENTIAL
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  ...(TURN_URL && TURN_USERNAME
+    ? [{
+        urls: [
+          `turn:${TURN_URL}:80`,
+          `turn:${TURN_URL}:80?transport=tcp`,
+          `turn:${TURN_URL}:443`,
+          `turns:${TURN_URL}:443?transport=tcp`,
+        ],
+        username: TURN_USERNAME,
+        credential: TURN_CREDENTIAL,
+      }]
+    : []),
+]
+
+let cachedIce: { servers: RTCIceServer[]; at: number } | null = null
+
+async function loadIceServers(): Promise<RTCIceServer[]> {
+  if (cachedIce && Date.now() - cachedIce.at < 10 * 60 * 1000) return cachedIce.servers
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 4000)
+    const res = await fetch('/api/webrtc/ice-servers', { signal: ctrl.signal })
+    clearTimeout(t)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data.iceServers) && data.iceServers.length) {
+        const hasTurn = data.iceServers.some((s: RTCIceServer) =>
+          ([] as string[]).concat(s.urls as any).some((u) => u.startsWith('turn')))
+        if (!hasTurn) {
+          console.warn('[WebRTC] Backend returned no TURN server — calls across different networks will likely fail. Set METERED_* or TURN_* env vars on the backend.')
+        }
+        cachedIce = { servers: data.iceServers, at: Date.now() }
+        return data.iceServers
+      }
     }
-  ],
-  // Optional debugging switch: Set VITE_FORCE_TURN=true to test TURN relays exclusively
-  ...(import.meta.env.VITE_FORCE_TURN === 'true' ? { iceTransportPolicy: 'relay' } : {})
+  } catch (e) {
+    console.warn('[WebRTC] Could not fetch ICE servers from backend, using fallback', e)
+  }
+  return FALLBACK_ICE_SERVERS
+}
+
+const randomId = () => Math.random().toString(36).slice(2, 10)
+
+/** Lower receive-side buffering — big win for perceived latency. */
+function tuneReceiver(receiver: RTCRtpReceiver) {
+  try { (receiver as any).playoutDelayHint = 0 } catch { /* unsupported */ }
+  try { (receiver as any).jitterBufferTarget = 0 } catch { /* unsupported */ }
+}
+
+/** Prefer smooth, low-delay video over resolution; cap bitrate to avoid queueing. */
+async function tuneSender(sender: RTCRtpSender) {
+  if (!sender.track) return
+  try {
+    if (sender.track.kind === 'video') {
+      ;(sender.track as any).contentHint = 'motion'
+      const p = sender.getParameters()
+      if (!p.encodings || p.encodings.length === 0) p.encodings = [{}]
+      p.encodings[0].maxBitrate = 1_200_000
+      p.encodings[0].maxFramerate = 30
+      ;(p as any).degradationPreference = 'maintain-framerate'
+      await sender.setParameters(p)
+    }
+  } catch (e) {
+    console.debug('[WebRTC] sender tuning skipped:', e)
+  }
 }
 
 export function useWebRTC(
   sessionId: string,
   role: 'candidate' | 'interviewer',
-  localStream: MediaStream | null
+  localStream: MediaStream | null,
+  onData?: (msg: any) => void
 ) {
   const [state, setState] = useState<WebRTCState>('idle')
   const [error, setError] = useState('')
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
 
-  // Refs for mutable objects that must survive re-renders
   const pcRef = useRef<RTCPeerConnection | null>(null)
+  const pcIdRef = useRef<string>('')
+  const remotePcIdRef = useRef<string>('')
+  const dcRef = useRef<RTCDataChannel | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const iceServersRef = useRef<RTCIceServer[]>(FALLBACK_ICE_SERVERS)
   const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
-  const hasRemoteDescription = useRef(false)
-  const isCreatingOffer = useRef(false)
+  const makingOffer = useRef(false)
+  const stopped = useRef(true)
   const isInitialized = useRef(false)
   const remoteStreamRef = useRef<MediaStream>(new MediaStream())
-
   const localStreamRef = useRef<MediaStream | null>(localStream)
+  const onDataRef = useRef(onData)
+  const timers = useRef<{ ping?: any; reconnect?: any; disconnect?: any }>({})
+  const peerPresent = useRef(false)
+  // Signaling messages are processed strictly one after another so an offer,
+  // its ICE candidates and duplicates can never race each other.
+  const opChain = useRef<Promise<void>>(Promise.resolve())
 
-  const attachTracksToPC = useCallback(async (pc: RTCPeerConnection, stream: MediaStream | null) => {
-    if (!pc || !stream) return
-    const tracks = stream.getTracks()
-    for (const track of tracks) {
-      const transceivers = pc.getTransceivers()
-      const tc = transceivers.find((t) => t.receiver?.track?.kind === track.kind)
-      if (tc) {
-        tc.direction = 'sendrecv'
-        if (tc.sender.track !== track) {
-          try {
-            await tc.sender.replaceTrack(track)
-            console.log(`[WebRTC] Replaced ${track.kind} track on transceiver`)
-          } catch (err) {
-            console.warn(`[WebRTC] replaceTrack failed for ${track.kind}:`, err)
-          }
-        }
-      } else {
-        try {
-          pc.addTrack(track, stream)
-          console.log(`[WebRTC] Attached track ${track.kind} via addTrack`)
-        } catch (e) {
-          console.warn(`[WebRTC] addTrack fallback failed:`, e)
-        }
-      }
+  useEffect(() => { onDataRef.current = onData }, [onData])
+
+  const sendSignal = useCallback((msg: any) => {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ ...msg, pcId: pcIdRef.current }))
     }
   }, [])
 
-  // Dynamically attach local tracks or replace existing sender tracks
+  /** Put local tracks onto the negotiated transceivers (no renegotiation needed). */
+  const attachLocalTracks = useCallback(async (pc: RTCPeerConnection, stream: MediaStream | null) => {
+    if (!stream) return
+    for (const track of stream.getTracks()) {
+      const tc = pc.getTransceivers().find(
+        (t) => t.currentDirection !== 'stopped' && t.receiver.track?.kind === track.kind
+      )
+      if (!tc) continue
+      if (tc.direction !== 'sendrecv') tc.direction = 'sendrecv'
+      if (tc.sender.track !== track) {
+        try {
+          await tc.sender.replaceTrack(track)
+          try { tc.sender.setStreams?.(stream) } catch { /* ignore */ }
+        } catch (err) {
+          console.warn(`[WebRTC] replaceTrack failed for ${track.kind}:`, err)
+        }
+      }
+      tuneSender(tc.sender)
+    }
+  }, [])
+
+  // Local stream changed (camera switch / toggle) → swap tracks in place.
   useEffect(() => {
     localStreamRef.current = localStream
-    if (pcRef.current && localStream) {
-      attachTracksToPC(pcRef.current, localStream)
-    }
-  }, [localStream, attachTracksToPC])
+    if (pcRef.current && localStream) attachLocalTracks(pcRef.current, localStream)
+  }, [localStream, attachLocalTracks])
 
-  /**
-   * Flush any ICE candidates that were queued before the remote
-   * description was set.
-   */
+  const setupDataChannel = useCallback((pc: RTCPeerConnection) => {
+    // Negotiated channel: both sides create it with the same id, no extra signaling.
+    const dc = pc.createDataChannel('sync', { negotiated: true, id: 0, ordered: true })
+    dc.onmessage = (e) => {
+      try { onDataRef.current?.(JSON.parse(e.data)) } catch { /* ignore */ }
+    }
+    dc.onopen = () => console.log('[WebRTC] Data channel open (P2P code sync active)')
+    dcRef.current = dc
+  }, [])
+
   const flushIceCandidates = useCallback(async () => {
     const pc = pcRef.current
-    if (!pc) return
-
+    if (!pc || !pc.remoteDescription) return
     const queue = iceCandidateQueue.current
     iceCandidateQueue.current = []
-
-    for (const candidate of queue) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate))
-      } catch (e) {
-        console.warn('[WebRTC] Failed to add queued ICE candidate:', e)
-      }
-    }
-
-    if (queue.length > 0) {
-      console.log(`[WebRTC] Flushed ${queue.length} queued ICE candidates`)
+    for (const c of queue) {
+      try { await pc.addIceCandidate(c) } catch (e) { console.warn('[WebRTC] queued ICE add failed', e) }
     }
   }, [])
 
-  /**
-   * Create the SDP offer (candidate only) and send it via signaling WS.
-   */
-  const createAndSendOffer = useCallback(async () => {
+  const createAndSendOffer = useCallback(async (iceRestart = false) => {
     const pc = pcRef.current
-    const ws = wsRef.current
-    if (!pc || !ws || ws.readyState !== WebSocket.OPEN) return
-
-    // If we already have a local offer that wasn't answered yet, re-send it
-    if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
-      console.log('[WebRTC] Re-sending pending local offer to peer...')
-      ws.send(JSON.stringify({
-        type: 'offer',
-        sdp: pc.localDescription.sdp,
-      }))
-      return
-    }
-
-    if (pc.signalingState !== 'stable') {
-      console.warn(`[WebRTC] Postponing offer: signalingState is ${pc.signalingState}`)
-      return
-    }
-    if (isCreatingOffer.current) {
-      console.log('[WebRTC] Offer already in flight, skipping redundant trigger')
-      return
-    }
-
-    try {
-      isCreatingOffer.current = true
-      if (localStreamRef.current) {
-        await attachTracksToPC(pc, localStreamRef.current)
+    if (!pc || pc.signalingState === 'closed') return
+    if (makingOffer.current) return
+    if (pc.signalingState !== 'stable' && !iceRestart) {
+      // Offer still unanswered (e.g. interviewer just joined) → re-send it.
+      if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
+        sendSignal({ type: 'offer', sdp: pc.localDescription.sdp })
       }
-
-      console.log('[WebRTC] Creating SDP offer...')
-      const offer = await pc.createOffer()
+      return
+    }
+    // Already connected and nothing to renegotiate
+    if (!iceRestart && pc.connectionState === 'connected') return
+    try {
+      makingOffer.current = true
+      await attachLocalTracks(pc, localStreamRef.current)
+      const offer = await pc.createOffer({ iceRestart })
       await pc.setLocalDescription(offer)
-
-      ws.send(JSON.stringify({
-        type: 'offer',
-        sdp: offer.sdp,
-      }))
-      console.log('[WebRTC] Offer sent to signaling server')
+      sendSignal({ type: 'offer', sdp: offer.sdp })
+      console.log(`[WebRTC] Offer sent${iceRestart ? ' (ICE restart)' : ''}`)
     } catch (e) {
       console.error('[WebRTC] Failed to create/send offer:', e)
-      setState('error')
-      setError('Failed to create video offer')
     } finally {
-      isCreatingOffer.current = false
+      makingOffer.current = false
     }
-  }, [attachTracksToPC])
+  }, [attachLocalTracks, sendSignal])
 
-  /**
-   * Handle an incoming SDP offer (interviewer only).
-   * Sets remote description then creates and sends the answer.
-   */
-  const handleOffer = useCallback(async (sdp: string) => {
-    const pc = pcRef.current
-    const ws = wsRef.current
-    if (!pc || !ws || ws.readyState !== WebSocket.OPEN) return
+  /** Build a fresh RTCPeerConnection (called at start and whenever the remote peer is new). */
+  const buildPeerConnection = useCallback(() => {
+    const old = pcRef.current
+    if (old) { try { old.close() } catch { /* ignore */ } }
 
-    try {
-      console.log('[WebRTC] Received offer — setting remote description...')
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }))
-      hasRemoteDescription.current = true
+    const pc = new RTCPeerConnection({
+      iceServers: iceServersRef.current,
+      iceCandidatePoolSize: 4,
+      bundlePolicy: 'max-bundle',
+      ...(import.meta.env.VITE_FORCE_TURN === 'true' ? { iceTransportPolicy: 'relay' as RTCIceTransportPolicy } : {}),
+    })
+    pcRef.current = pc
+    pcIdRef.current = randomId()
+    remotePcIdRef.current = ''
+    iceCandidateQueue.current = []
+    remoteStreamRef.current = new MediaStream()
+    setRemoteStream(null)
 
-      // Flush any ICE candidates that arrived before the offer
-      await flushIceCandidates()
+    // Exactly one audio + one video transceiver on each side, created up front.
+    // The offerer's m-lines are matched by the answerer's transceivers created
+    // via addTransceiver in the same order, so tracks can be swapped in any time.
+    if (role === 'candidate') {
+      pc.addTransceiver('audio', { direction: 'sendrecv' })
+      pc.addTransceiver('video', { direction: 'sendrecv' })
+      attachLocalTracks(pc, localStreamRef.current)
+    }
+    setupDataChannel(pc)
 
-      // Attach latest local tracks to transceivers before creating answer
-      if (localStreamRef.current) {
-        await attachTracksToPC(pc, localStreamRef.current)
+    pc.ontrack = (event) => {
+      tuneReceiver(event.receiver)
+      const rs = remoteStreamRef.current
+      if (!rs.getTracks().some((t) => t.id === event.track.id)) {
+        rs.getTracks().filter((t) => t.kind === event.track.kind).forEach((t) => rs.removeTrack(t))
+        rs.addTrack(event.track)
       }
+      const publish = () => setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
+      event.track.onunmute = publish
+      publish()
+    }
 
-      console.log('[WebRTC] Creating SDP answer...')
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendSignal({ type: 'ice-candidate', candidate: event.candidate.toJSON() })
+      }
+    }
+
+    pc.onicecandidateerror = (e: any) => {
+      // 701 = server unreachable. Auth errors (401) mean bad TURN credentials.
+      if (e.errorCode && e.errorCode !== 701) {
+        console.warn(`[WebRTC] ICE server error ${e.errorCode} ${e.errorText} (${e.url})`)
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState
+      console.log(`[WebRTC] connection: ${s}`)
+      if (pc !== pcRef.current) return
+      if (s === 'connected') {
+        clearTimeout(timers.current.disconnect)
+        setState('connected')
+        setError('')
+        // Log which path was chosen — 'relay' means TURN is in use.
+        pc.getStats().then((stats) => {
+          stats.forEach((r: any) => {
+            if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') {
+              const l = stats.get(r.localCandidateId), rm = stats.get(r.remoteCandidateId)
+              console.log(`[WebRTC] Path: local=${l?.candidateType}/${l?.protocol} remote=${rm?.candidateType}, RTT=${Math.round((r.currentRoundTripTime || 0) * 1000)}ms`)
+            }
+          })
+        }).catch(() => {})
+      } else if (s === 'disconnected') {
+        // Give it a few seconds to self-heal, then ICE-restart.
+        clearTimeout(timers.current.disconnect)
+        timers.current.disconnect = setTimeout(() => {
+          if (pcRef.current === pc && pc.connectionState !== 'connected' && role === 'candidate') {
+            createAndSendOffer(true)
+          }
+        }, 4000)
+      } else if (s === 'failed') {
+        if (role === 'candidate') {
+          console.warn('[WebRTC] Connection failed — attempting ICE restart')
+          createAndSendOffer(true)
+        } else {
+          sendSignal({ type: 'restart-request' })
+        }
+        setState('connecting')
+        setError('Reconnecting video… (if this persists, the TURN relay is not reachable)')
+      }
+    }
+
+    return pc
+  }, [role, attachLocalTracks, setupDataChannel, sendSignal, createAndSendOffer])
+
+  const handleOffer = useCallback(async (sdp: string, fromPcId: string) => {
+    let pc = pcRef.current
+    // A new candidate connection (refresh / rejoin) → start from a clean PC.
+    if (!pc || (remotePcIdRef.current && fromPcId && fromPcId !== remotePcIdRef.current)) {
+      console.log('[WebRTC] New remote peer connection — rebuilding')
+      pc = buildPeerConnection()
+    }
+    if (fromPcId) remotePcIdRef.current = fromPcId
+    // Duplicate of the offer we already answered → ignore.
+    if (pc.signalingState === 'stable' && pc.remoteDescription?.sdp === sdp) return
+    try {
+      if (pc.signalingState !== 'stable') {
+        await pc.setLocalDescription({ type: 'rollback' }).catch(() => {})
+      }
+      await pc.setRemoteDescription({ type: 'offer', sdp })
+      await flushIceCandidates()
+      await attachLocalTracks(pc, localStreamRef.current)
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-
-      ws.send(JSON.stringify({
-        type: 'answer',
-        sdp: answer.sdp,
-      }))
-      console.log('[WebRTC] Answer sent to signaling server')
+      sendSignal({ type: 'answer', sdp: answer.sdp })
+      setState((s) => (s === 'connected' ? s : 'connecting'))
+      console.log('[WebRTC] Answer sent')
     } catch (e) {
       console.error('[WebRTC] Failed to handle offer:', e)
-      setState('error')
-      setError('Failed to respond to video offer')
     }
-  }, [flushIceCandidates, attachTracksToPC])
+  }, [buildPeerConnection, flushIceCandidates, attachLocalTracks, sendSignal])
 
-  /**
-   * Handle an incoming SDP answer (candidate only).
-   */
-  const handleAnswer = useCallback(async (sdp: string) => {
+  const handleAnswer = useCallback(async (sdp: string, fromPcId: string) => {
     const pc = pcRef.current
-    if (!pc) return
-
+    if (!pc || pc.signalingState !== 'have-local-offer') return // duplicate/stale answer
     try {
-      console.log('[WebRTC] Received answer — setting remote description...')
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
-      hasRemoteDescription.current = true
-
-      // Flush any ICE candidates that arrived before the answer
+      await pc.setRemoteDescription({ type: 'answer', sdp })
+      if (fromPcId) remotePcIdRef.current = fromPcId
       await flushIceCandidates()
     } catch (e) {
       console.error('[WebRTC] Failed to handle answer:', e)
     }
   }, [flushIceCandidates])
 
-  /**
-   * Handle an incoming ICE candidate from the remote peer.
-   */
-  const handleIceCandidate = useCallback(async (candidateInit: RTCIceCandidateInit) => {
+  const handleRemoteIce = useCallback(async (c: RTCIceCandidateInit, fromPcId: string) => {
     const pc = pcRef.current
     if (!pc) return
-
-    if (hasRemoteDescription.current) {
-      // Remote description already set — add immediately
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidateInit))
-      } catch (e) {
-        console.warn('[WebRTC] Failed to add ICE candidate:', e)
-      }
+    // Drop candidates belonging to an old remote connection
+    if (fromPcId && remotePcIdRef.current && fromPcId !== remotePcIdRef.current) return
+    if (pc.remoteDescription) {
+      try { await pc.addIceCandidate(c) } catch (e) { console.warn('[WebRTC] addIceCandidate failed', e) }
     } else {
-      // Queue for later
-      iceCandidateQueue.current.push(candidateInit)
+      iceCandidateQueue.current.push(c)
     }
   }, [])
 
-  /**
-   * Main initialization: create PeerConnection + Signaling WebSocket.
-   */
-  const initialize = useCallback(() => {
-    if (isInitialized.current) return
-    if (!sessionId) return
-    isInitialized.current = true
-
-    setState('waiting')
-    setError('')
-    hasRemoteDescription.current = false
-    iceCandidateQueue.current = []
-    remoteStreamRef.current = new MediaStream()
-
-    // ─── 1. Create RTCPeerConnection ───
-    console.log(`[WebRTC] Initializing as ${role} for session ${sessionId}`)
-    const pc = new RTCPeerConnection(ICE_CONFIG)
-    pcRef.current = pc
-
-    // Add existing tracks directly so sender and stream IDs are immediately bound
-    if (localStreamRef.current && localStreamRef.current.getTracks().length > 0) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        try {
-          pc.addTrack(track, localStreamRef.current!)
-          console.log(`[WebRTC] Initialized track ${track.kind} (${track.id}) with stream`)
-        } catch (e) {
-          console.warn('[WebRTC] Error adding initial track:', e)
-        }
-      })
-    }
-
-    // Ensure transceivers exist for both audio and video so we can receive
-    const existingKinds = pc.getTransceivers().map((t) => t.receiver?.track?.kind)
-    if (!existingKinds.includes('audio')) {
-      try { pc.addTransceiver('audio', { direction: 'sendrecv' }) } catch {}
-    }
-    if (!existingKinds.includes('video')) {
-      try { pc.addTransceiver('video', { direction: 'sendrecv' }) } catch {}
-    }
-
-    // Handle incoming remote tracks
-    pc.ontrack = (event) => {
-      console.log(`[WebRTC] Received remote ${event.track.kind} track (${event.track.id})`)
-
-      if (event.streams && event.streams[0]) {
-        remoteStreamRef.current = event.streams[0]
-      } else {
-        const exists = remoteStreamRef.current.getTracks().some((t) => t.id === event.track.id)
-        if (!exists) {
-          remoteStreamRef.current.addTrack(event.track)
-        }
-      }
-
-      event.track.onunmute = () => {
-        console.log(`[WebRTC] Remote track ${event.track.kind} unmuted`)
-        setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
-      }
-
-      // Create a fresh MediaStream reference so React detects the change
-      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
-      setState('connected')
-    }
-
-    // Connection state monitoring
-    pc.onconnectionstatechange = () => {
-      const s = pc.connectionState
-      console.log(`[WebRTC] PeerConnection state: ${s}`)
-      if (s === 'connected') {
-        setState('connected')
-      } else if (s === 'failed') {
-        setState('error')
-        setError('WebRTC connection failed. Please refresh.')
-      } else if (s === 'disconnected') {
-        // May recover — don't immediately error
-        console.warn('[WebRTC] Connection disconnected — may recover...')
-      }
-    }
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`[WebRTC] ICE connection state: ${pc.iceConnectionState}`)
-    }
-
-    // ─── 2. Connect Signaling WebSocket ───
-    const wsUrl = buildSignalingUrl(sessionId, role)
-    console.log(`[WebRTC] Connecting to signaling: ${wsUrl}`)
-    const ws = new WebSocket(wsUrl)
+  const connectSignaling = useCallback(() => {
+    if (stopped.current) return
+    const ws = new WebSocket(buildSignalingUrl(sessionId, role))
     wsRef.current = ws
 
-    // Send local ICE candidates to remote peer via signaling
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log(`[WebRTC] ICE candidate type: ${event.candidate.type}`)
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'ice-candidate',
-            candidate: {
-              candidate: event.candidate.candidate,
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex,
-            },
-          }))
-        }
-      }
-    }
-
     ws.onopen = () => {
-      console.log(`[WebRTC] Signaling WebSocket connected as ${role}`)
-      // Tell the server we're ready
-      ws.send(JSON.stringify({ type: 'ready' }))
+      console.log(`[WebRTC] Signaling connected as ${role}`)
+      ws.send(JSON.stringify({ type: 'ready', pcId: pcIdRef.current }))
     }
 
     ws.onmessage = (event) => {
       let msg: any
-      try {
-        msg = JSON.parse(event.data)
-      } catch {
-        return
-      }
+      try { msg = JSON.parse(event.data) } catch { return }
+      const fromPcId: string = msg.pcId || ''
+      if (msg.type === 'pong') return
+      opChain.current = opChain.current.then(() => handleSignal(msg, fromPcId)).catch((e) => {
+        console.warn('[WebRTC] signaling handler error', e)
+      })
+    }
 
+    const handleSignal = async (msg: any, fromPcId: string) => {
       switch (msg.type) {
         case 'room-ready':
-          // Both peers present — candidate creates the offer
-          console.log('[WebRTC] Room ready — both peers connected')
-          if (role === 'candidate') {
-            createAndSendOffer()
-          }
-          break
-
         case 'ready':
-          console.log(`[WebRTC] Remote peer sent ready (${msg.from || 'peer'})`)
-          if (role === 'candidate') {
-            createAndSendOffer()
-          }
-          break
-
         case 'peer-joined':
-          console.log(`[WebRTC] Peer joined: ${msg.role}`)
+          peerPresent.current = true
           if (role === 'candidate') {
-            createAndSendOffer()
+            const pc = pcRef.current
+            // Interviewer is a fresh connection → rebuild and re-offer.
+            if (pc && remotePcIdRef.current && fromPcId && fromPcId !== remotePcIdRef.current) {
+              buildPeerConnection()
+            } else if (pc && pc.connectionState === 'failed') {
+              buildPeerConnection()
+            }
+            await createAndSendOffer()
           }
           break
-
         case 'offer':
-          // Only the interviewer should receive offers
-          if (role === 'interviewer') {
-            handleOffer(msg.sdp)
-          }
+          if (role === 'interviewer') await handleOffer(msg.sdp, fromPcId)
           break
-
         case 'answer':
-          // Only the candidate should receive answers
-          if (role === 'candidate') {
-            handleAnswer(msg.sdp)
-          }
+          if (role === 'candidate') await handleAnswer(msg.sdp, fromPcId)
           break
-
         case 'ice-candidate':
-          if (msg.candidate) {
-            handleIceCandidate(msg.candidate)
-          }
+          if (msg.candidate) await handleRemoteIce(msg.candidate, fromPcId)
           break
-
+        case 'restart-request':
+          if (role === 'candidate') await createAndSendOffer(true)
+          break
         case 'peer-left':
           console.log(`[WebRTC] Peer left: ${msg.role}`)
+          peerPresent.current = false
           setState('waiting')
-          setRemoteStream(null)
-          remoteStreamRef.current = new MediaStream()
-          hasRemoteDescription.current = false
-          if (pc && pc.signalingState === 'have-local-offer') {
-            try {
-              pc.setLocalDescription({ type: 'rollback' }).catch(() => {})
-            } catch {}
-          }
+          buildPeerConnection()
           break
-
-        case 'pong':
-          // Heartbeat response — ignore
-          break
-
         default:
-          console.log(`[WebRTC] Unknown signaling message: ${msg.type}`)
+          break
       }
     }
 
-    ws.onerror = (e) => {
-      console.error('[WebRTC] Signaling WebSocket error:', e)
+    ws.onclose = () => {
+      if (wsRef.current !== ws || stopped.current) return
+      console.warn('[WebRTC] Signaling closed — reconnecting in 2s')
+      timers.current.reconnect = setTimeout(connectSignaling, 2000)
     }
+    ws.onerror = () => { /* onclose handles reconnect */ }
+  }, [sessionId, role, buildPeerConnection, createAndSendOffer, handleOffer, handleAnswer, handleRemoteIce])
 
-    ws.onclose = (e) => {
-      console.log(`[WebRTC] Signaling WebSocket closed (code=${e.code})`)
+  const initialize = useCallback(async () => {
+    if (isInitialized.current || !sessionId) return
+    isInitialized.current = true
+    stopped.current = false
+    setState('waiting')
+    setError('')
+
+    iceServersRef.current = await loadIceServers()
+    if (stopped.current) return
+
+    console.log(`[WebRTC] Initializing as ${role} for session ${sessionId}`)
+    buildPeerConnection()
+    connectSignaling()
+
+    timers.current.ping = setInterval(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
+    }, 20000)
+  }, [sessionId, role, buildPeerConnection, connectSignaling])
+
+  /** Send a JSON message to the peer over the P2P data channel. Returns false if not open. */
+  const sendData = useCallback((msg: any): boolean => {
+    const dc = dcRef.current
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify(msg)); return true } catch { return false }
     }
+    return false
+  }, [])
 
-    // Heartbeat to keep the WebSocket alive through proxies
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }))
-      }
-    }, 25000)
-
-      // Store cleanup ref for the ping interval
-      ; (pc as any).__pingInterval = pingInterval
-
-  }, [sessionId, role, localStream, createAndSendOffer, handleOffer, handleAnswer, handleIceCandidate])
-
-  /**
-   * Clean teardown of everything.
-   */
   const stop = useCallback(() => {
-    // Clear ping interval
-    const pc = pcRef.current
-    if (pc && (pc as any).__pingInterval) {
-      clearInterval((pc as any).__pingInterval)
-    }
+    stopped.current = true
+    clearInterval(timers.current.ping)
+    clearTimeout(timers.current.reconnect)
+    clearTimeout(timers.current.disconnect)
 
-    // Close WebSocket
     const ws = wsRef.current
+    wsRef.current = null
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({ type: 'bye' }))
-        } catch { /* ignore */ }
+        try { ws.send(JSON.stringify({ type: 'bye' })) } catch { /* ignore */ }
       }
       ws.close()
-      wsRef.current = null
     }
-
-    // Close PeerConnection
-    if (pc) {
-      pc.close()
+    if (pcRef.current) {
+      try { pcRef.current.close() } catch { /* ignore */ }
       pcRef.current = null
     }
-
-    // Reset state
+    dcRef.current = null
     setState('idle')
     setError('')
     setRemoteStream(null)
     remoteStreamRef.current = new MediaStream()
-    hasRemoteDescription.current = false
     iceCandidateQueue.current = []
+    remotePcIdRef.current = ''
     isInitialized.current = false
   }, [])
 
-  return {
-    state,
-    error,
-    remoteStream,
-    initialize,
-    stop,
-  }
+  return { state, error, remoteStream, initialize, stop, sendData }
 }

@@ -62,7 +62,7 @@ app.include_router(report.router, prefix="/api", tags=["Reports"])
 app.include_router(tts.router, prefix="/api", tags=["Text-to-Speech"])
 app.include_router(face_verification.router, prefix="/api", tags=["Face Verification"])
 app.include_router(ws_handlers.router, tags=["WebSocket Handlers"])
-app.include_router(webrtc.router, tags=["WebRTC SFU"])
+app.include_router(webrtc.router, tags=["WebRTC ICE config"])
 
 # Static directory for local image uploads fallback
 uploads_dir = Path(__file__).resolve().parent.parent / "uploads"

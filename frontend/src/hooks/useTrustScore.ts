@@ -54,6 +54,7 @@ export interface CodeSyncState {
   executionTime?: number
   status?: string
   lastUpdated?: string
+  seq?: number
 }
 
 export function useTrustScore(sessionId: string) {
@@ -148,12 +149,17 @@ export function useTrustScore(sessionId: string) {
           }
         }
         else if (msg.type === 'CODE_CHANGE') {
-          setCodeSync(prev => ({
+          setCodeSync(prev => {
+            // Ignore out-of-date copies (P2P data channel may already be ahead)
+            if (typeof msg.seq === 'number' && typeof prev.seq === 'number' && msg.seq <= prev.seq) return prev
+            return {
             ...prev,
+            seq: typeof msg.seq === 'number' ? msg.seq : prev.seq,
             code: msg.code !== undefined ? msg.code : prev.code,
             language: msg.language || prev.language,
             lastUpdated: msg.timestamp || new Date().toISOString(),
-          }))
+            }
+          })
         }
         else if (msg.type === 'CODE_RUNNING') {
           setCodeSync(prev => ({

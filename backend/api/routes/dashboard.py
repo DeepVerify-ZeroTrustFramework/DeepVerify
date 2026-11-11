@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from db.redis_client import get_pubsub
 from db.mongo import get_sessions_collection, get_telemetry_collection, get_alerts_collection, get_invitations_collection
 from api.routes.ws_handlers import get_session_code, revert_anomaly_penalty
+from api.routes import live_bus
 
 router = APIRouter()
 
@@ -32,12 +33,12 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
     collection = get_sessions_collection()
     session_doc = await collection.find_one({"session_id": session_id})
     if not session_doc:
-        await websocket.send_json({"error": "Session not found"})
+        await live_bus.safe_send(websocket, {"error": "Session not found"})
         await websocket.close(code=4004)
         return
 
     # Send initial session info
-    await websocket.send_json({
+    await live_bus.safe_send(websocket, {
         "type": "SESSION_INFO",
         "session_id": session_id,
         "candidate_name": session_doc.get("candidate_name", "Unknown"),
@@ -62,7 +63,7 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
         })
 
     if history:
-        await websocket.send_json({
+        await live_bus.safe_send(websocket, {
             "type": "SCORE_HISTORY",
             "history": history,
         })
@@ -88,7 +89,7 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
         existing_alerts.append(alert)
 
     if existing_alerts:
-        await websocket.send_json({
+        await live_bus.safe_send(websocket, {
             "type": "EXISTING_ALERTS",
             "alerts": list(reversed(existing_alerts)),
         })
@@ -96,10 +97,13 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
     # Send current code editor state if candidate has already typed code
     curr_code = get_session_code(session_id)
     if curr_code and curr_code.get("code"):
-        await websocket.send_json({
+        await live_bus.safe_send(websocket, {
             "type": "CODE_CHANGE",
             **curr_code,
         })
+
+    # Register for the in-process fast path (live code sync)
+    live_bus.register_dashboard(session_id, websocket)
 
     # Subscribe to Redis pub/sub for real-time updates
     pubsub = await get_pubsub(session_id)
@@ -126,6 +130,7 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         print(f"[Dashboard] Interviewer disconnected from session {session_id}")
     finally:
+        live_bus.unregister_dashboard(session_id, websocket)
         await pubsub.unsubscribe()
         await pubsub.close()
 
@@ -146,24 +151,26 @@ async def _listen_redis(pubsub, websocket: WebSocket, session_id: str):
 
                 if f'trust_score:{session_id}' in channel:
                     msg_type = parsed.get("type", "TRUST_UPDATE")
-                    await websocket.send_json({
+                    await live_bus.safe_send(websocket, {
                         "type": msg_type,
                         **parsed,
                     })
                 elif f'alerts:{session_id}' in channel:
                     msg_type = parsed.get("type", "ALERT")
-                    await websocket.send_json({
+                    await live_bus.safe_send(websocket, {
                         "type": msg_type,
                         **parsed,
                     })
                 elif f'code:{session_id}' in channel:
                     msg_type = parsed.get("type", "CODE_CHANGE")
-                    await websocket.send_json({
+                    await live_bus.safe_send(websocket, {
                         "type": msg_type,
                         **parsed,
                     })
 
-            await asyncio.sleep(0.05)  # Responsive socket forwarding
+            # No sleep here: get_message(timeout=...) already blocks while idle.
+            # The old 50ms sleep after EVERY message capped forwarding at
+            # 20 msg/s, so updates queued up and arrived seconds late.
     except (WebSocketDisconnect, Exception):
         pass
 
@@ -181,7 +188,7 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
                     {"session_id": session_id},
                     {"$set": {"flagged_for_review": True, "status": "FLAGGED"}}
                 )
-                await websocket.send_json({
+                await live_bus.safe_send(websocket, {
                     "type": "COMMAND_ACK",
                     "command": "FLAG_SESSION",
                     "message": "Session flagged for review",
@@ -200,7 +207,7 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
                     {"session_id": session_id},
                     {"$set": {"status": "COMPLETED"}}
                 )
-                await websocket.send_json({
+                await live_bus.safe_send(websocket, {
                     "type": "COMMAND_ACK",
                     "command": "END_SESSION",
                     "message": "Session ended",
@@ -226,7 +233,7 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
                     # Revert anomaly penalty and recalculate live trust score
                     rev_result = await revert_anomaly_penalty(session_id, alert_id, alert_doc)
 
-                    await websocket.send_json({
+                    await live_bus.safe_send(websocket, {
                         "type": "COMMAND_ACK",
                         "command": "ACK_ALERT",
                         "alert_id": alert_id,

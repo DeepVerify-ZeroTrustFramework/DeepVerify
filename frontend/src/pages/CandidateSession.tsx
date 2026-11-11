@@ -80,6 +80,7 @@ export default function CandidateSession() {
   const [codeOutput, setCodeOutput] = useState<{ stdout: string; stderr: string; executionTime?: number; status?: string } | null>(null)
   const [showTerminal, setShowTerminal] = useState(false)
   const codeDebounceRef = useRef<any>(null)
+  const rtcSendDataRef = useRef<((msg: any) => boolean) | null>(null)
 
   // Virtual Camera / OBS detection
   const [virtualCamBlocked, setVirtualCamBlocked] = useState(false)
@@ -471,6 +472,7 @@ export default function CandidateSession() {
 
   // Initialize WebRTC
   const rtc = useWebRTC(session?.session_id || '', 'candidate', localStream)
+  rtcSendDataRef.current = rtc.sendData
 
   // Initialize Behavioral Socket with violation callbacks
   const telemetry = useBehavioralSocket(session?.session_id || '', !!session, {
@@ -481,14 +483,19 @@ export default function CandidateSession() {
     telemetryRef.current = telemetry
   }, [telemetry])
 
+  // Only (re)initialize when the session appears or the camera first becomes
+  // available. Later stream changes (camera switch / toggle) are swapped into
+  // the live connection by useWebRTC via replaceTrack — no reconnect needed.
+  const hasLocalStream = !!localStream
   useEffect(() => {
-    if (session && localStream) {
+    if (session && hasLocalStream) {
       rtc.initialize()
     }
     return () => {
       rtc.stop()
     }
-  }, [session, localStream])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, hasLocalStream])
 
   // Session completion polling (Interviewer ends session)
   useEffect(() => {
@@ -737,16 +744,35 @@ export default function CandidateSession() {
     }
   }
 
-  // Broadcast code to interviewer (debounced)
-  const broadcastCodeChange = useCallback((newCode: string, lang: string) => {
-    if (codeDebounceRef.current) clearTimeout(codeDebounceRef.current)
-    codeDebounceRef.current = setTimeout(() => {
-      telemetryRef.current?.sendEvent('CODE_CHANGE', {
-        code: newCode,
-        language: LANGUAGE_TEMPLATES[lang]?.lang || lang.toLowerCase(),
-      })
-    }, 150)
+  // Broadcast code to interviewer — THROTTLED (not debounced): while the
+  // candidate types continuously, an update still goes out every ~40ms.
+  // Sent peer-to-peer over the WebRTC data channel (lowest latency) AND over the
+  // telemetry WebSocket (persistence + fallback). The interviewer keeps whichever
+  // copy has the highest `seq`, so duplicates are harmless.
+  const codeSeqRef = useRef(0)
+  const pendingCodeRef = useRef<{ code: string; lang: string } | null>(null)
+  const lastCodeSentAtRef = useRef(0)
+  const flushCode = useCallback(() => {
+    codeDebounceRef.current = null
+    const pending = pendingCodeRef.current
+    if (!pending) return
+    pendingCodeRef.current = null
+    lastCodeSentAtRef.current = performance.now()
+    const payload = {
+      code: pending.code,
+      language: LANGUAGE_TEMPLATES[pending.lang]?.lang || pending.lang.toLowerCase(),
+      seq: ++codeSeqRef.current,
+      timestamp: new Date().toISOString(),
+    }
+    rtcSendDataRef.current?.({ type: 'CODE_CHANGE', ...payload })
+    telemetryRef.current?.sendEvent('CODE_CHANGE', payload)
   }, [])
+  const broadcastCodeChange = useCallback((newCode: string, lang: string) => {
+    pendingCodeRef.current = { code: newCode, lang }
+    if (codeDebounceRef.current) return
+    const wait = Math.max(0, 40 - (performance.now() - lastCodeSentAtRef.current))
+    codeDebounceRef.current = setTimeout(flushCode, wait)
+  }, [flushCode])
 
   const handleEditorCodeChange = (value: string | undefined) => {
     const val = value || ''

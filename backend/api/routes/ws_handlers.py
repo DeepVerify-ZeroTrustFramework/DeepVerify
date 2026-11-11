@@ -12,6 +12,7 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from db.mongo import get_sessions_collection, get_telemetry_collection, get_alerts_collection, get_behavioral_events_collection
 from modules.axiom import axiom_fusion_engine
+from api.routes import live_bus
 
 router = APIRouter()
 
@@ -69,7 +70,35 @@ def _get_telemetry(session_id: str) -> dict:
     return _session_telemetry[session_id]
 
 
+_thresholds_cache: Dict[str, tuple] = {}
+_THRESHOLDS_TTL_S = 15.0
+
+
 async def _get_session_thresholds(session_id: str) -> dict:
+    """Per-candidate thresholds, cached for a few seconds.
+
+    This used to hit MongoDB on every telemetry message (gaze arrives 5x/sec).
+    With a remote Atlas cluster that round-trip alone was slower than the
+    arrival rate, so the candidate socket built an ever-growing backlog and
+    CODE_CHANGE messages sat behind it - the main cause of editor lag.
+    """
+    cached = _thresholds_cache.get(session_id)
+    now = time.monotonic()
+    if cached and now - cached[0] < _THRESHOLDS_TTL_S:
+        return dict(cached[1])
+    result = await _load_session_thresholds(session_id)
+    _thresholds_cache[session_id] = (now, result)
+    return dict(result)
+
+
+def _fire_and_forget(coro):
+    """Run a DB/Redis write without blocking the socket's receive loop."""
+    task = asyncio.create_task(coro)
+    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+    return task
+
+
+async def _load_session_thresholds(session_id: str) -> dict:
     """Load per-candidate thresholds from MongoDB."""
     try:
         collection = get_sessions_collection()
@@ -579,18 +608,24 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
             elif msg_type == "CODE_CHANGE":
                 code_content = msg.get("code", "")
                 code_lang = msg.get("language", "python")
+                code_seq = msg.get("seq")
+                prev = _session_code.get(session_id)
+                # Drop out-of-order updates
+                if isinstance(code_seq, int) and prev and isinstance(prev.get("seq"), int) and code_seq <= prev["seq"]:
+                    continue
                 _session_code[session_id] = {
                     "code": code_content,
                     "language": code_lang,
+                    "seq": code_seq,
                     "timestamp": timestamp.isoformat(),
                 }
-                from db.redis_client import publish_code_update
-                await publish_code_update(session_id, {
-                    "type": "CODE_CHANGE",
-                    "code": code_content,
-                    "language": code_lang,
-                    "timestamp": timestamp.isoformat(),
-                })
+                payload = {"type": "CODE_CHANGE", **_session_code[session_id]}
+                # Fast path: interviewer dashboard socket is in this same process.
+                delivered = await live_bus.send_to_dashboards(session_id, payload)
+                if not delivered:
+                    # Multi-instance fallback via Redis (don't block the loop on it)
+                    from db.redis_client import publish_code_update
+                    _fire_and_forget(publish_code_update(session_id, payload))
                 continue
 
             elif msg_type == "VIRTUAL_CAMERA_DETECTED":
@@ -629,7 +664,14 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 await websocket.send_json({"type": "pong"})
                 continue
 
-            # Run Axiom fusion and push to dashboard
+            # Run Axiom fusion and push to dashboard.
+            # GAZE arrives ~5x/sec; recomputing + publishing a TRUST_UPDATE for
+            # each one flooded Redis and the dashboard. Cap it at ~2/sec.
+            if msg_type == "GAZE":
+                now_mono = time.monotonic()
+                if now_mono - telemetry.get("_last_fusion_at", 0.0) < 0.5:
+                    continue
+                telemetry["_last_fusion_at"] = now_mono
             thresholds = await _get_session_thresholds(session_id)
 
             from modules.behavioral import compute_behavioral_score
@@ -702,13 +744,13 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
             telemetry["_frame_count"] = frame_count
             if frame_count % 5 == 0:
                 telemetry_col = get_telemetry_collection()
-                await telemetry_col.insert_one({
+                _fire_and_forget(telemetry_col.insert_one({
                     "session_id": session_id,
                     "timestamp": timestamp,
                     "trust_score": result["trust_score"],
                     "breakdown": result["breakdown"],
                     "raw": trust_update["raw"],
-                })
+                }))
 
     except WebSocketDisconnect:
         print(f"[WS] Candidate disconnected from session {session_id}")

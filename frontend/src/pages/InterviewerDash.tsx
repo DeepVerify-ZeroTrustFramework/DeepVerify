@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ShieldCheck, Activity, Clock, Loader2, AlertCircle, LogOut, 
@@ -57,7 +57,19 @@ export default function InterviewerDash() {
   }
 
   // Initialize WebSockets for dashboard data (including live codeSync & score reversion)
-  const { score, breakdown, raw, alerts, status: wsStatus, codeSync, acknowledgeAlert } = useTrustScore(sessionId || '')
+  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert } = useTrustScore(sessionId || '')
+
+  // Code arriving peer-to-peer over the WebRTC data channel (fastest path).
+  // Whichever copy (P2P or WebSocket) has the higher seq wins.
+  const [p2pCode, setP2pCode] = useState<{ code: string; language: string; seq: number } | null>(null)
+  const handleRtcData = useCallback((msg: any) => {
+    if (msg?.type === 'CODE_CHANGE' && typeof msg.code === 'string') {
+      setP2pCode((prev) => (prev && (msg.seq ?? 0) <= prev.seq ? prev : { code: msg.code, language: msg.language, seq: msg.seq ?? 0 }))
+    }
+  }, [])
+  const codeSync = p2pCode && p2pCode.seq > (wsCodeSync.seq ?? 0)
+    ? { ...wsCodeSync, code: p2pCode.code, language: p2pCode.language || wsCodeSync.language }
+    : wsCodeSync
 
   const handleInterviewerRun = async () => {
     if (!codeSync?.code || interviewerRunning) return
@@ -82,7 +94,7 @@ export default function InterviewerDash() {
   }
 
   // Initialize WebRTC
-  const rtc = useWebRTC(sessionId || '', 'interviewer', localStream)
+  const rtc = useWebRTC(sessionId || '', 'interviewer', localStream, handleRtcData)
 
   useEffect(() => {
     async function init() {
@@ -147,16 +159,18 @@ export default function InterviewerDash() {
     setCamEnabled(next)
   }
 
+  // Connect once the session + a stream exist. Later stream changes are swapped
+  // into the live connection via replaceTrack (no teardown / reconnect).
+  const hasLocalStream = !!localStream
   useEffect(() => {
-    // Connect to signaling WebSocket and set up P2P connection once stream is ready
-    if (session && localStream) {
+    if (session && hasLocalStream) {
       rtc.initialize()
     }
     return () => {
       rtc.stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, localStream])
+  }, [session, hasLocalStream])
 
 
   if (loading) {
