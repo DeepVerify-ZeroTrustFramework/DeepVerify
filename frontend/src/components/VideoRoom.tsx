@@ -50,8 +50,8 @@ export default function VideoRoom({
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
           if (localStream) {
-            newStream.getAudioTracks().forEach(t => localStream.addTrack(t))
-            onLocalStreamChange?.(localStream)
+            // New object, otherwise React (and the call) never see the new track
+            onLocalStreamChange?.(new MediaStream([...localStream.getTracks(), ...newStream.getAudioTracks()]))
           } else {
             onLocalStreamChange?.(newStream)
           }
@@ -78,8 +78,8 @@ export default function VideoRoom({
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const newStream = await navigator.mediaDevices.getUserMedia({ video: true })
           if (localStream) {
-            newStream.getVideoTracks().forEach(t => localStream.addTrack(t))
-            onLocalStreamChange?.(localStream)
+            // New object, otherwise React (and the call) never see the new track
+            onLocalStreamChange?.(new MediaStream([...localStream.getTracks(), ...newStream.getVideoTracks()]))
           } else {
             onLocalStreamChange?.(newStream)
           }

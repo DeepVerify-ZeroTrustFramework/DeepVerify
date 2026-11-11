@@ -92,11 +92,24 @@ async def _get_session_thresholds(session_id: str) -> dict:
     return dict(result)
 
 
-def _fire_and_forget(coro):
-    """Run a DB/Redis write without blocking the socket's receive loop."""
-    task = asyncio.create_task(coro)
-    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-    return task
+def _fire_and_forget(aw):
+    """Run a DB/Redis write without blocking the socket's receive loop.
+
+    Accepts ANY awaitable. Motor's insert_one() returns a Future, not a
+    coroutine, and asyncio.create_task() rejects that with a TypeError - which
+    crashed the candidate socket on every 5th trust update (and lost the
+    behavioral events around it). Wrapping it in our own coroutine works for
+    both, and a failed write is logged instead of ever reaching the caller."""
+    async def _run():
+        try:
+            await aw
+        except Exception as e:
+            print(f"[BG] Background write failed: {e!r}")
+    try:
+        return asyncio.ensure_future(_run())
+    except Exception as e:
+        print(f"[BG] Could not schedule background write: {e!r}")
+        return None
 
 
 async def _load_session_thresholds(session_id: str) -> dict:
@@ -451,12 +464,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 score = msg.get("score", 0.8)
                 telemetry["prohibited_objects_5min"] += 1
 
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "PROHIBITED_OBJECT",
                     "timestamp": timestamp,
                     "metadata": {"object": obj_name, "score": score},
-                })
+                }))
 
                 obj_cooldown = telemetry.get("_object_alert_cooldown", 0)
                 if obj_cooldown <= 0:
@@ -477,12 +490,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
 
             elif msg_type == "MULTI_MONITOR":
                 telemetry["multi_monitors_5min"] += 1
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "MULTI_MONITOR",
                     "timestamp": timestamp,
                     "metadata": msg,
-                })
+                }))
 
                 mon_cooldown = telemetry.get("_monitor_alert_cooldown", 0)
                 if mon_cooldown <= 0:
@@ -505,12 +518,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 action = msg.get("action", msg.get("shortcut", "CLIPBOARD"))
                 telemetry["large_pastes_5min"] += 1
 
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "CLIPBOARD_VIOLATION",
                     "timestamp": timestamp,
                     "metadata": {"action": action},
-                })
+                }))
 
                 alert_msg = {
                     "type": "ALERT",
@@ -525,12 +538,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 await _push_to_dashboard(session_id, alert_msg)
 
             elif msg_type == "CONTEXT_MENU_BLOCKED":
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "CONTEXT_MENU_BLOCKED",
                     "timestamp": timestamp,
                     "metadata": {},
-                })
+                }))
 
                 alert_msg = {
                     "type": "ALERT",
@@ -545,12 +558,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 await _push_to_dashboard(session_id, alert_msg)
 
             elif msg_type == "DEVTOOLS_ATTEMPT":
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "DEVTOOLS_ATTEMPT",
                     "timestamp": timestamp,
                     "metadata": msg,
-                })
+                }))
 
                 alert_msg = {
                     "type": "ALERT",
@@ -566,12 +579,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
 
             elif msg_type == "TAB_SWITCH":
                 telemetry["tab_switches_5min"] += 1
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "TAB_SWITCH",
                     "timestamp": timestamp,
                     "metadata": msg.get("metadata", {}),
-                })
+                }))
                 alert_msg = {
                     "type": "ALERT",
                     "alertId": f"tab-{timestamp.timestamp():.0f}",
@@ -586,12 +599,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
 
             elif msg_type == "WINDOW_BLUR":
                 duration_ms = msg.get("duration_ms", 0)
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "WINDOW_BLUR",
                     "timestamp": timestamp,
                     "metadata": {"duration_ms": duration_ms},
-                })
+                }))
                 if duration_ms > 2000:
                     alert_msg = {
                         "type": "ALERT",
@@ -608,12 +621,12 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
             elif msg_type == "LARGE_PASTE":
                 telemetry["large_pastes_5min"] += 1
                 char_count = msg.get("char_count", 0)
-                await events_col.insert_one({
+                _fire_and_forget(events_col.insert_one({
                     "session_id": session_id,
                     "type": "LARGE_PASTE",
                     "timestamp": timestamp,
                     "metadata": {"char_count": char_count},
-                })
+                }))
                 alert_msg = {
                     "type": "ALERT",
                     "alertId": f"paste-{timestamp.timestamp():.0f}",

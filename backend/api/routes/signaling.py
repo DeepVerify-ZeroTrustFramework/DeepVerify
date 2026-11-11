@@ -78,7 +78,9 @@ async def websocket_signaling(websocket: WebSocket, session_id: str):
                 continue
 
             # Relay signaling messages to the other peer
-            if msg_type in ("offer", "answer", "ice-candidate", "ready", "bye"):
+            # restart-request: interviewer asks the candidate for an ICE restart.
+            # renegotiate: interviewer's camera/mic appeared mid-call, candidate re-offers.
+            if msg_type in ("offer", "answer", "ice-candidate", "ready", "bye", "restart-request", "renegotiate"):
                 msg["from"] = role
                 if msg_type in ("offer", "answer"):
                     sdp = msg.get("sdp", "")

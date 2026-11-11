@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ShieldCheck, Activity, Clock, Loader2, AlertCircle, LogOut, 
@@ -13,6 +13,34 @@ import VideoRoom from '../components/VideoRoom'
 import { useTrustScore } from '../hooks/useTrustScore'
 import { useWebRTC } from '../hooks/useWebRTC'
 
+// Why the interviewer's camera could not start, in plain words.
+function describeMediaError(e: any): string {
+  const name = e?.name || ''
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError')
+    return 'Your camera is being used by another app or browser tab (Zoom, Teams, Camera app, another DeepVerify tab). Close it - the camera will reconnect automatically.'
+  if (name === 'NotAllowedError' || name === 'SecurityError')
+    return 'Camera permission is blocked for this site. Click the camera icon in the address bar, allow it, then press Retry.'
+  if (name === 'NotFoundError' || name === 'OverconstrainedError')
+    return 'No camera was found on this device.'
+  return `Camera could not start${e?.message ? `: ${e.message}` : ''}.`
+}
+
+// Camera + microphone, getting whatever is available. Never throws.
+async function getInterviewerMedia(): Promise<{ stream: MediaStream; error: string | null }> {
+  const md = navigator.mediaDevices
+  if (!md?.getUserMedia) return { stream: new MediaStream(), error: 'This browser cannot access a camera.' }
+  try {
+    return { stream: await md.getUserMedia({ video: true, audio: true }), error: null }
+  } catch (first) {
+    let videoErr: any = first
+    let video: MediaStreamTrack[] = []
+    let audio: MediaStreamTrack[] = []
+    try { video = (await md.getUserMedia({ video: true })).getVideoTracks() } catch (e) { videoErr = e }
+    try { audio = (await md.getUserMedia({ audio: true })).getAudioTracks() } catch { /* no mic */ }
+    return { stream: new MediaStream([...video, ...audio]), error: video.length ? null : describeMediaError(videoErr) }
+  }
+}
+
 export default function InterviewerDash() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
@@ -21,6 +49,9 @@ export default function InterviewerDash() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [camError, setCamError] = useState<string | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
+  useEffect(() => { localStreamRef.current = localStream }, [localStream])
   const [showFaceModal, setShowFaceModal] = useState(false)
   const [activeView, setActiveView] = useState<'forensics' | 'code'>('forensics')
 
@@ -57,7 +88,7 @@ export default function InterviewerDash() {
   }
 
   // Initialize WebSockets for dashboard data (including live codeSync & score reversion)
-  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert, clearAlerts, clearedCount } = useTrustScore(sessionId || '')
+  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert } = useTrustScore(sessionId || '')
 
   // Code arriving peer-to-peer over the WebRTC data channel (fastest path).
   // Whichever copy (P2P or WebSocket) has the higher seq wins.
@@ -109,46 +140,50 @@ export default function InterviewerDash() {
         setLoading(false)
       }
 
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-          setLocalStream(stream)
-        }
-      } catch (e) {
-        console.warn('Interviewer camera access not available on mount (may be locked by candidate):', e)
-        try {
-          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-            setLocalStream(audioStream)
-          }
-        } catch (audioErr) {
-          console.warn('Interviewer audio access also unavailable:', audioErr)
-          setLocalStream(new MediaStream())
-        }
-      }
+      // Camera + mic. If the camera fails, say why and keep retrying (below);
+      // the call still connects with whatever is available.
+      const { stream, error } = await getInterviewerMedia()
+      if (error) console.warn('[Interviewer] Camera unavailable:', error)
+      setLocalStream(stream)
+      setCamError(error)
     }
     init()
 
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach(t => t.stop())
-      }
+      localStreamRef.current?.getTracks().forEach(t => t.stop())
     }
   }, [sessionId])
+
+  // (Re)start the interviewer's camera and swap it into the live call. A NEW
+  // MediaStream object is created so React and the WebRTC hook see the change.
+  const retryCamera = useCallback(async (silent = false) => {
+    try {
+      const v = await navigator.mediaDevices.getUserMedia({ video: true })
+      const cur = localStreamRef.current
+      const audio = cur ? cur.getAudioTracks() : []
+      cur?.getVideoTracks().forEach(t => t.stop())
+      setLocalStream(new MediaStream([...v.getVideoTracks(), ...audio]))
+      setCamError(null)
+      setCamEnabled(true)
+      console.log('[Interviewer] Camera started')
+    } catch (e) {
+      if (!silent) console.warn('[Interviewer] Camera retry failed:', e)
+      setCamError(describeMediaError(e))
+    }
+  }, [])
+
+  // While the camera is unavailable (e.g. in use by another app), retry quietly.
+  useEffect(() => {
+    if (!camError) return
+    const t = setInterval(() => { retryCamera(true) }, 4000)
+    return () => clearInterval(t)
+  }, [camError, retryCamera])
 
   const [camEnabled, setCamEnabled] = useState(true)
 
   const toggleCamera = async () => {
-    if (!localStream) {
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-          setLocalStream(stream)
-          setCamEnabled(true)
-        }
-      } catch (e) {
-        console.warn('Could not start interviewer camera:', e)
-      }
+    if (!localStream || localStream.getVideoTracks().length === 0) {
+      await retryCamera()
       return
     }
 
@@ -216,7 +251,7 @@ export default function InterviewerDash() {
             </div>
             <div className="flex justify-between items-center text-xs">
               <span className="text-[#6B6B6B]">Recorded Alerts:</span>
-              <span className="font-semibold text-[#0F0F0F]">{alerts.length + clearedCount} Flagged Events</span>
+              <span className="font-semibold text-[#0F0F0F]">{alerts.length} Flagged Events</span>
             </div>
           </div>
 
@@ -375,6 +410,17 @@ export default function InterviewerDash() {
               <span className="text-[11px] font-mono text-[#6B6B6B]">720p / 30fps</span>
             </div>
             <div className="relative aspect-[4/3] bg-[#0A0A0A]">
+              {camError && (
+                <div className="absolute bottom-2 left-2 right-2 z-20 rounded-lg bg-[#2A1A05]/95 border border-amber-500/60 px-3 py-2 text-[11px] text-amber-100 flex items-center gap-2">
+                  <span className="flex-1">{camError}</span>
+                  <button
+                    onClick={() => retryCamera()}
+                    className="shrink-0 px-2 py-1 rounded-md bg-amber-500 text-black font-bold hover:bg-amber-400"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               <VideoRoom
                 state={rtc.state}
                 remoteStream={rtc.remoteStream}
@@ -496,22 +542,9 @@ export default function InterviewerDash() {
                   <h2 className="text-[13px] font-bold text-[#0F0F0F]">Anomaly Detection</h2>
                 </div>
                 {alerts && alerts.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-full bg-[#FEE2E2] text-[#991B1B] text-[10px] font-bold">
-                      {alerts.length} New
-                    </span>
-                    <button
-                      onClick={() => {
-                        if (window.confirm('Clear all anomalies from this feed?\n\nThis only tidies the view. The trust score is not changed and the anomalies stay in the session report.')) {
-                          clearAlerts()
-                        }
-                      }}
-                      title="Clear the feed (does not change the score)"
-                      className="px-2 py-0.5 rounded-md border border-[#E4E4E6] text-[10px] font-semibold text-[#6B6B6B] hover:text-[#0F0F0F] hover:bg-[#F7F7F8] transition-colors"
-                    >
-                      Clear all
-                    </button>
-                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-[#FEE2E2] text-[#991B1B] text-[10px] font-bold">
+                    {alerts.length} New
+                  </span>
                 )}
               </div>
               <div className="flex-1 overflow-y-auto p-4 bg-[#F7F7F8]">

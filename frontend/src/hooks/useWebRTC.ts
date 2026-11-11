@@ -147,15 +147,24 @@ export function useWebRTC(
     }
   }, [])
 
-  /** Put local tracks onto the negotiated transceivers (no renegotiation needed). */
-  const attachLocalTracks = useCallback(async (pc: RTCPeerConnection, stream: MediaStream | null) => {
-    if (!stream) return
+  /** Put local tracks onto the transceivers. Returns true when a track now has to
+   *  be SENT on a transceiver that was negotiated as receive-only (e.g. the
+   *  interviewer's camera came up after the call connected) - that needs a new
+   *  offer/answer round, replaceTrack alone is not enough. */
+  const attachLocalTracks = useCallback(async (pc: RTCPeerConnection, stream: MediaStream | null): Promise<boolean> => {
+    if (!stream) return false
+    let needsNegotiation = false
     for (const track of stream.getTracks()) {
       const tc = pc.getTransceivers().find(
         (t) => t.currentDirection !== 'stopped' && t.receiver.track?.kind === track.kind
       )
       if (!tc) continue
-      if (tc.direction !== 'sendrecv') tc.direction = 'sendrecv'
+      if (tc.direction !== 'sendrecv') {
+        tc.direction = 'sendrecv'
+        if (tc.currentDirection && tc.currentDirection !== 'sendrecv' && tc.currentDirection !== 'sendonly') {
+          needsNegotiation = true
+        }
+      }
       if (tc.sender.track !== track) {
         try {
           await tc.sender.replaceTrack(track)
@@ -166,13 +175,9 @@ export function useWebRTC(
       }
       tuneSender(tc.sender)
     }
+    return needsNegotiation
   }, [])
 
-  // Local stream changed (camera switch / toggle) → swap tracks in place.
-  useEffect(() => {
-    localStreamRef.current = localStream
-    if (pcRef.current && localStream) attachLocalTracks(pcRef.current, localStream)
-  }, [localStream, attachLocalTracks])
 
   const setupDataChannel = useCallback((pc: RTCPeerConnection) => {
     // Negotiated channel: both sides create it with the same id, no extra signaling.
@@ -194,7 +199,7 @@ export function useWebRTC(
     }
   }, [])
 
-  const createAndSendOffer = useCallback(async (iceRestart = false) => {
+  const createAndSendOffer = useCallback(async (iceRestart = false, force = false) => {
     const pc = pcRef.current
     if (!pc || pc.signalingState === 'closed') return
     if (makingOffer.current) return
@@ -206,7 +211,7 @@ export function useWebRTC(
       return
     }
     // Already connected and nothing to renegotiate
-    if (!iceRestart && pc.connectionState === 'connected') return
+    if (!iceRestart && !force && pc.connectionState === 'connected') return
     try {
       makingOffer.current = true
       await attachLocalTracks(pc, localStreamRef.current)
@@ -220,6 +225,21 @@ export function useWebRTC(
       makingOffer.current = false
     }
   }, [attachLocalTracks, sendSignal])
+
+  // Local stream changed (camera switch / toggle / camera became available) →
+  // swap tracks in place; if this side now SENDS something it was only
+  // receiving before, renegotiate so the other side actually gets it.
+  useEffect(() => {
+    localStreamRef.current = localStream
+    const pc = pcRef.current
+    if (!pc || !localStream) return
+    attachLocalTracks(pc, localStream).then((needsNegotiation) => {
+      if (!needsNegotiation || pc !== pcRef.current) return
+      console.log('[WebRTC] Local media changed mid-call - renegotiating')
+      if (role === 'interviewer') sendSignal({ type: 'renegotiate' })
+      else createAndSendOffer(false, true)
+    })
+  }, [localStream, attachLocalTracks, createAndSendOffer, sendSignal, role])
 
   /** Build a fresh RTCPeerConnection (called at start and whenever the remote peer is new). */
   const buildPeerConnection = useCallback(() => {
@@ -413,6 +433,10 @@ export function useWebRTC(
           break
         case 'restart-request':
           if (role === 'candidate') await createAndSendOffer(true)
+          break
+        case 'renegotiate':
+          // The interviewer's camera/mic became available mid-call: offer again
+          if (role === 'candidate') await createAndSendOffer(false, true)
           break
         case 'peer-left':
           console.log(`[WebRTC] Peer left: ${msg.role}`)
