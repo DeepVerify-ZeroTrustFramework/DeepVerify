@@ -1,200 +1,314 @@
 """
-PRNU Hardware Fingerprinting Module.
+PRNU Hardware Fingerprinting Module (v2).
 
-Implements sensor-level camera fingerprinting using Photo Response Non-Uniformity (PRNU).
-Based on Lukas, Fridrich & Goljan — wavelet-based noise residual extraction + MLE estimator.
+Sensor-level camera fingerprinting using Photo Response Non-Uniformity (PRNU),
+after Lukas, Fridrich & Goljan (2006) and Chen et al. (2008).
 
-Key operations:
-- extract_noise_residual(frame) — Daubechies-8 wavelet, 4-level decomposition
-- estimate_prnu_reference(frames) — MLE: K̂ = Σ(Wn·In) / Σ(In²)
-- compute_pce(W_test, K_hat) — Peak-to-Correlation Energy via FFT
-- Decision: PCE > 60 → AUTHENTIC (threshold adjusted for video compression)
+What changed in v2 (and why):
+  * Noise residual is now  W = I - F(I), with F = wavelet *shrinkage* denoising
+    (detail coefficients soft-thresholded, approximation kept). v1 zeroed the
+    approximation band instead, so its "residual" was the low-frequency picture
+    itself (0.94 correlation with the image) — PCE then measured scene
+    similarity, not the sensor.
+  * Rows/columns of W are zero-meaned to remove linear patterns (demosaicing,
+    JPEG/codec grids) that every camera shares.
+  * PRNU frames must be NATIVE-resolution crops (no resampling). Downscaling
+    averages neighbouring sensor pixels and erases the fingerprint. The browser
+    sends a 320x240 centre crop of the raw camera frame for this (see
+    CandidateSession.tsx / useSystemCheck.ts), tagged with the camera resolution.
+  * PCE is evaluated at zero spatial shift (live video is not re-registered),
+    and several test frames are aggregated before deciding.
+
+Measured on the project's data (320x240 crops): frames from a *different*
+source (21 other webcams, phone videos, AI-generated videos) scored PCE <= 41
+in ~1,500 tests — so the standard decision threshold of 60 holds.
 """
+from typing import List, Optional, Tuple
 import numpy as np
 import pywt
-from typing import List, Tuple
+import cv2
+
+PRNU_VERSION = 2
+CROP_W, CROP_H = 320, 240
+
+PCE_MATCH = 60.0      # >= : same camera (Lukas et al. threshold; impostor max seen: 41)
+PCE_MISMATCH = 25.0   # <= (aggregated, after enough frames): different camera / source
+AGG_FRAMES = 5        # test frames combined per decision
+
+
+# ── Residual extraction ───────────────────────────────────────────────────────
+def _residual_gray(gray: np.ndarray) -> np.ndarray:
+    """W = I - wavelet-shrinkage-denoised(I), rows/cols zero-meaned. gray in [0,1]."""
+    coeffs = pywt.wavedec2(gray, 'db8', level=3)
+    sigma = np.median(np.abs(coeffs[-1][2])) / 0.6745          # noise level from finest HH band
+    thr = sigma * np.sqrt(2.0 * np.log(gray.size))               # universal threshold
+    den = [coeffs[0]] + [tuple(pywt.threshold(d, thr, 'soft') for d in lvl) for lvl in coeffs[1:]]
+    rec = pywt.waverec2(den, 'db8')[:gray.shape[0], :gray.shape[1]]
+    w = gray - rec
+    w = w - w.mean(axis=1, keepdims=True)
+    w = w - w.mean(axis=0, keepdims=True)
+    return w
+
+
+def _green(frame_bgr: np.ndarray) -> np.ndarray:
+    # Green: highest PRNU SNR (2x green sites in the Bayer pattern)
+    return frame_bgr[:, :, 1].astype(np.float64) / 255.0
 
 
 def extract_noise_residual(frame_bgr: np.ndarray) -> np.ndarray:
     """
-    Apply wavelet denoising to extract PRNU noise residual W = I - F(I).
-
-    Uses Daubechies-8 wavelet with 4-level decomposition (Lukas et al. standard).
-    Zeroes out approximation (low-frequency) coefficients and keeps only detail
-    (noise) sub-bands. The residual is the difference between original and denoised.
-
-    Args:
-        frame_bgr: BGR image as numpy array (uint8 or float32)
-
-    Returns:
-        Noise residual W as float32 array with shape (H, W, 3)
+    PRNU noise residual of a frame. Returns float32 (H, W, 3) for backward
+    compatibility; all three planes hold the green-channel residual.
     """
-    frame_float = frame_bgr.astype(np.float32) / 255.0
-    residuals = []
-
-    for c in range(3):  # Process each color channel (B, G, R)
-        channel = frame_float[:, :, c]
-
-        # Daubechies-8 wavelet, 3-level decomposition (faster than 4-level, still effective)
-        coeffs = pywt.wavedec2(channel, 'db8', level=3)
-
-        # Zero out approximation (low-freq) coefficients — keep only detail (noise)
-        coeffs_thresh = list(coeffs)
-        coeffs_thresh[0] = np.zeros_like(coeffs[0])
-
-        # Reconstruct denoised image from detail coefficients only
-        denoised = pywt.waverec2(coeffs_thresh, 'db8')
-
-        # Trim to original dimensions (wavelet reconstruction may add padding)
-        denoised = denoised[:channel.shape[0], :channel.shape[1]]
-
-        # Residual = Original - Denoised = noise component
-        residuals.append(channel - denoised)
-
-    return np.stack(residuals, axis=2)  # W — shape (H, W, 3)
+    w = _residual_gray(_green(frame_bgr)).astype(np.float32)
+    return np.stack([w, w, w], axis=2)
 
 
 def estimate_prnu_reference(frames_list: List[np.ndarray]) -> np.ndarray:
     """
-    MLE estimator for PRNU reference fingerprint K̂ from N enrollment frames.
-
-    Formula: K̂ = Σ(Wn · In) / Σ(In²)
-
-    Where:
-    - Wn is the noise residual of frame n
-    - In is the normalized intensity of frame n
-
-    The result is zero-mean normalized to remove fixed pattern noise.
-
-    Args:
-        frames_list: List of BGR images (uint8 numpy arrays), all same dimensions
-
-    Returns:
-        PRNU reference fingerprint K̂ as float64 array
+    MLE fingerprint  K = Σ(W_n·I_n) / Σ(I_n²)  over N frames (same size, ideally
+    native-resolution crops). Returns float32 (H, W, 3), zero-mean.
     """
-    # Get target shape from first frame
-    target_h, target_w = frames_list[0].shape[:2]
-
-    numerator = np.zeros((target_h, target_w, 3), dtype=np.float64)
-    denominator = np.zeros((target_h, target_w, 3), dtype=np.float64)
-
-    for frame in frames_list:
-        I = frame.astype(np.float64) / 255.0
-        W = extract_noise_residual(frame).astype(np.float64)
-
-        numerator += W * I
-        denominator += I ** 2
-
-    # MLE: K̂ = Σ(W·I) / Σ(I²), with epsilon to avoid division by zero
-    K_hat = np.where(denominator > 1e-8, numerator / denominator, 0)
-
-    # Zero-mean normalization (removes fixed pattern noise)
-    K_hat -= K_hat.mean()
-
-    return K_hat
+    h, w = frames_list[0].shape[:2]
+    num = np.zeros((h, w)); den = np.zeros((h, w))
+    for f in frames_list:
+        if f.shape[:2] != (h, w):
+            continue
+        I = _green(f)
+        num += _residual_gray(I) * I
+        den += I * I
+    K = np.where(den > 1e-8, num / den, 0.0)
+    K = K - K.mean()
+    K = K - K.mean(axis=1, keepdims=True)
+    K = K - K.mean(axis=0, keepdims=True)
+    K = K.astype(np.float32)
+    return np.stack([K, K, K], axis=2)
 
 
-def compute_pce(W_test: np.ndarray, K_hat: np.ndarray) -> float:
+# ── Matching ─────────────────────────────────────────────────────────────────
+def _pce_zero_shift(a: np.ndarray, b: np.ndarray) -> float:
+    """Signed PCE of the cross-correlation peak near zero shift."""
+    a = a - a.mean(); b = b - b.mean()
+    xc = np.real(np.fft.ifft2(np.fft.fft2(a) * np.conj(np.fft.fft2(b))))
+    near = np.zeros_like(xc, dtype=bool)
+    near[:2, :2] = near[:2, -1:] = near[-1:, :2] = near[-1:, -1:] = True   # ±1 px
+    peak = float(xc[near].max())
+    excl = np.zeros_like(xc, dtype=bool)
+    excl[:6, :6] = excl[:6, -5:] = excl[-5:, :6] = excl[-5:, -5:] = True  # 11x11 around origin
+    energy = float(np.mean(xc[~excl] ** 2)) + 1e-30
+    return float(np.sign(peak) * peak * peak / energy)
+
+
+def compute_pce(W_test: np.ndarray, K_hat: np.ndarray, source: str = 'webrtc',
+                I: Optional[np.ndarray] = None) -> float:
     """
-    Compute Peak-to-Correlation Energy (PCE) via cross-correlation in frequency domain.
-
-    Uses the green channel (index 1) which has the highest PRNU SNR due to
-    Bayer filter pattern having 2x green pixels.
-
-    PCE = peak² / mean(all_other_values²)
-
-    High PCE (> 60) indicates the test frame came from the same camera as the reference.
-
-    Args:
-        W_test: Noise residual of test frame, shape (H, W, 3)
-        K_hat: PRNU reference fingerprint, shape (H, W, 3)
-
-    Returns:
-        PCE value as float. Higher = more likely authentic.
+    PCE between a test residual and the fingerprint (zero shift).
+    Pass I (the test frame's green channel in [0,1]) for the proper I·K weighting.
     """
-    # Use green channel — highest PRNU SNR due to Bayer filter
-    w = W_test[:, :, 1].astype(np.float64)
-    k = K_hat[:, :, 1].astype(np.float64)
-
-    # Ensure matching 2D dimensions
-    h = min(w.shape[0], k.shape[0])
-    w_width = min(w.shape[1], k.shape[1])
-    w = w[:h, :w_width]
-    k = k[:h, :w_width]
-
-    # Zero-mean normalize both before correlation for maximum SNR
-    w = w - np.mean(w)
-    k = k - np.mean(k)
-
-    # 2D cross-correlation via 2D FFT (preserves 2D sensor pixel geometry)
-    F_w = np.fft.fft2(w)
-    F_k = np.fft.fft2(k)
-    cross_corr = np.fft.ifft2(F_w * np.conj(F_k)).real
-
-    # PCE = peak² / mean(energy outside 11x11 peak neighborhood)
-    corr_sq = cross_corr ** 2
-    peak_idx = np.unravel_index(np.argmax(corr_sq), corr_sq.shape)
-    peak = float(corr_sq[peak_idx])
-
-    # Standard Lukas & Fridrich PCE: zero out 11x11 neighborhood around peak
-    r, c = peak_idx
-    mask = corr_sq.copy()
-    r_min, r_max = max(0, r - 5), min(h, r + 6)
-    c_min, c_max = max(0, c - 5), min(w_width, c + 6)
-    mask[r_min:r_max, c_min:c_max] = 0.0
-
-    valid_energy = mask[mask > 0]
-    energy_rest = float(np.mean(valid_energy)) if len(valid_energy) > 0 else 1e-10
-
-    pce = peak / (energy_rest + 1e-10)
-
-    # Spatial alignment verification:
-    # A true camera sensor noise pattern is physically stationary on the sensor pixel grid,
-    # so its correlation peak MUST align at or near (0, 0) in circular lag space (+- 6 pixels).
-    # If the global peak is far from (0, 0), it is a random extreme-value noise artifact.
-    dr = min(r, h - r)
-    dc = min(c, w_width - c)
-    lag_dist = np.sqrt(dr * dr + dc * dc)
-    if lag_dist > 6.0:
-        # Check local peak near sensor origin (within +- 5 pixels)
-        r_orig = np.concatenate([np.arange(0, min(6, h)), np.arange(max(0, h - 5), h)])
-        c_orig = np.concatenate([np.arange(0, min(6, w_width)), np.arange(max(0, w_width - 5), w_width)])
-        sub_orig = corr_sq[np.ix_(r_orig, c_orig)]
-        peak_orig = float(np.max(sub_orig)) if sub_orig.size > 0 else 0.0
-        pce_orig = peak_orig / (energy_rest + 1e-10)
-        # If the origin peak is authentic (> 30), use it; otherwise bound by origin alignment
-        pce = min(pce, max(pce_orig, pce * 0.5))
-
-    return float(pce)
+    w = W_test[:, :, 1] if W_test.ndim == 3 else W_test
+    k = K_hat[:, :, 1] if K_hat.ndim == 3 else K_hat
+    h = min(w.shape[0], k.shape[0]); ww = min(w.shape[1], k.shape[1])
+    w = w[:h, :ww].astype(np.float64); k = k[:h, :ww].astype(np.float64)
+    if I is not None:
+        k = k * I[:h, :ww]
+    return _pce_zero_shift(w, k)
 
 
-def analyze_frame_prnu(frame_bgr: np.ndarray, K_hat: np.ndarray, threshold: float = 60.0) -> dict:
+def match_score(pce: float) -> float:
     """
-    Full PRNU analysis pipeline for a single test frame.
-
-    Args:
-        frame_bgr: Test frame (BGR, uint8)
-        K_hat: PRNU reference fingerprint from enrollment
-        threshold: PCE threshold (default 60, from Lukas et al., adjusted for video)
-
-    Returns:
-        Dict with pce value, is_authentic flag, and confidence score
+    Points share for the trust score: 1.0 = same camera, 0.5 = undecided
+    (neutral — weak frames, motion, low light), 0.0 = different camera.
     """
-    # Extract noise residual from test frame
-    W_test = extract_noise_residual(frame_bgr)
+    if pce >= PCE_MATCH:
+        return 1.0
+    if pce <= PCE_MISMATCH:
+        return 0.0
+    return 0.5
 
-    # Compute PCE
-    pce = compute_pce(W_test, K_hat)
 
-    # Decision
-    is_authentic = pce > threshold
+def analyze_frame_prnu(frame_bgr: np.ndarray, K_hat: np.ndarray, source: str = 'webrtc') -> dict:
+    """Single-frame analysis (kept for scripts/tests). Use PRNUTracker for live sessions."""
+    pce = compute_pce(extract_noise_residual(frame_bgr), K_hat, source, I=_green(frame_bgr))
+    return {"pce": pce, "is_authentic": pce >= PCE_MATCH, "confidence": match_score(pce),
+            "threshold": PCE_MATCH}
 
-    # Confidence: normalized PCE relative to threshold
-    confidence = min(1.0, pce / (2 * threshold)) if is_authentic else max(0.0, pce / threshold)
 
-    return {
-        "pce": pce,
-        "is_authentic": is_authentic,
-        "confidence": confidence,
-        "threshold": threshold,
-    }
+# ── Live session tracker ─────────────────────────────────────────────────────
+class PRNUTracker:
+    """
+    Per-session PRNU state, fed with native-resolution crops (~3/s).
+
+    Two fingerprints:
+      * K_sess — built from this interview's first SELF_ENROLL crops. Every later
+        crop is checked against it: "is it still the same camera?" (catches a
+        mid-interview switch to another device or injected video).
+      * K_enr  — from the system-check enrollment, used only when the camera
+        resolution matches: "is it the camera that was verified?"
+
+    Quality gate: some cameras/drivers denoise so hard that their sensor pattern
+    is not measurable. After K_sess is built, the next QUALITY_CROPS crops (taken
+    a few seconds later) must match K_sess; if they don't, the tracker reports
+    'low_signal' — neutral, no accusations — instead of flagging a genuine
+    candidate. States:
+      waiting → enrolling → checking → match | uncertain | mismatch | low_signal
+    """
+    SELF_ENROLL = 30
+    QUALITY_SKIP = 10      # ignore crops right after enrollment (same scene → optimistic)
+    QUALITY_CROPS = 15     # ~4.5 s window; every check in it must pass (worst case, not median)
+
+    def __init__(self, enrolled: Optional[dict] = None):
+        self.enrolled = enrolled            # {'K': 2-D array, 'width': int, 'height': int}
+        self.K_sess: Optional[np.ndarray] = None
+        self.K_enr: Optional[np.ndarray] = None
+        # Running MLE sums: crops confirmed as the same camera keep refining K_sess,
+        # so it gets stronger and less tied to the first scene as the interview goes on.
+        self._num: Optional[np.ndarray] = None
+        self._den: Optional[np.ndarray] = None
+        self._enroll_buf: List[np.ndarray] = []
+        self._agg: List[Tuple[np.ndarray, np.ndarray]] = []
+        self._quality_pces: List[float] = []
+        self._post_enroll = 0
+        self.quality_ok: Optional[bool] = None
+        self.state = 'waiting'
+        self.reference = 'none'
+        self.pce = 0.0              # the PCE that drives the decision (min of the checks)
+        self.pce_session = 0.0
+        self.pce_enrollment: Optional[float] = None
+        self.match: Optional[float] = None
+        self.crops_seen = 0
+        self.camera_res: Optional[Tuple[int, int]] = None
+        self.res_changed = False
+
+    @property
+    def K(self):  # backward-compatible accessor
+        return self.K_sess
+
+    def _refresh_k(self):
+        K = np.where(self._den > 1e-8, self._num / self._den, 0.0)
+        K = K - K.mean(); K = K - K.mean(axis=1, keepdims=True); K = K - K.mean(axis=0, keepdims=True)
+        self.K_sess = K
+
+    def _early_enrollment_check(self, W, I) -> Optional[dict]:
+        if self.K_enr is None:
+            return None
+        buf = getattr(self, '_early_agg', [])
+        buf.append((W, I))
+        self._early_agg = buf[-AGG_FRAMES:]
+        if len(self._early_agg) < 3:
+            return None
+        pce = _pce_zero_shift(sum(w for w, _ in self._early_agg), self.K_enr * sum(i for _, i in self._early_agg))
+        self._early_hits = getattr(self, '_early_hits', 0) + 1 if pce >= PCE_MATCH else 0
+        if self._early_hits < 3:
+            return None
+        self.pce = self.pce_enrollment = float(pce)
+        self.match, self.reference = 1.0, 'enrollment'
+        return {'pce': self.pce, 'match': 1.0, 'state': 'match', 'reference': 'enrollment',
+                'quality_ok': None, 'pce_session': None, 'pce_enrollment': self.pce}
+
+    def add_crop(self, crop_bgr: np.ndarray, cam_w: int, cam_h: int) -> Optional[dict]:
+        """Feed one native crop. Returns a dict when a new decision is available."""
+        if crop_bgr.shape[:2] != (CROP_H, CROP_W):
+            crop_bgr = cv2.resize(crop_bgr, (CROP_W, CROP_H))  # only if the camera is tiny
+        self.crops_seen += 1
+        if self.camera_res is None:
+            self.camera_res = (cam_w, cam_h)
+            en = self.enrolled
+            if en is not None and (int(en.get('width', 0)), int(en.get('height', 0))) == (cam_w, cam_h):
+                self.K_enr = np.asarray(en['K'], dtype=np.float64)
+        elif self.camera_res != (cam_w, cam_h):
+            self.res_changed = True        # different capture mode or a different device
+            self.camera_res = (cam_w, cam_h)
+
+        I = _green(crop_bgr)
+        W = _residual_gray(I)
+
+        # Fast start: while the session fingerprint is still being built (~15 s),
+        # compare against the fingerprint stored at the system check. Three
+        # confirmed matches in a row report 'match' right away. Never accuses:
+        # a weak or mismatching early reading just waits for the normal path.
+        early = None
+        if self.K_sess is None or self.quality_ok is None:
+            early = self._early_enrollment_check(W, I)
+
+        if self.K_sess is None:
+            self._enroll_buf.append(crop_bgr)
+            self.state = 'enrolling'
+            if len(self._enroll_buf) >= self.SELF_ENROLL:
+                self._num = np.zeros((CROP_H, CROP_W)); self._den = np.zeros((CROP_H, CROP_W))
+                for f in self._enroll_buf:
+                    Ii = _green(f); self._num += _residual_gray(Ii) * Ii; self._den += Ii * Ii
+                self._refresh_k()
+                self._enroll_buf = []
+                self.state = 'checking'
+            return early
+
+        self._agg.append((W, I))
+        self._agg = self._agg[-AGG_FRAMES:]
+        if len(self._agg) < 3:
+            return None
+        Wsum = sum(w for w, _ in self._agg)
+        Isum = sum(i for _, i in self._agg)
+        self.pce_session = _pce_zero_shift(Wsum, self.K_sess * Isum)
+
+        # Quality gate (once): is this camera's sensor pattern measurable at all?
+        if self.quality_ok is None:
+            self._post_enroll += 1
+            if self._post_enroll <= self.QUALITY_SKIP:
+                return early
+            self._quality_pces.append(self.pce_session)
+            if len(self._quality_pces) < self.QUALITY_CROPS:
+                return early
+            # Worst-case of the window: a camera whose pattern only *sometimes*
+            # shows up is not reliable enough to accuse anyone with.
+            self.quality_ok = float(np.percentile(self._quality_pces, 10)) >= PCE_MATCH
+            self._agg = []
+            if not self.quality_ok:
+                self.state, self.match, self.reference = 'low_signal', None, 'none'
+                return {'pce': self.pce_session, 'match': None, 'state': self.state,
+                        'reference': self.reference, 'quality_ok': False}
+            return None
+
+        if not self.quality_ok:
+            self.pce = self.pce_session
+            return None   # stays 'low_signal' — no decisions, no accusations
+
+        checks = [self.pce_session]
+        self.reference = 'session'
+        if self.K_enr is not None:
+            self.pce_enrollment = _pce_zero_shift(Wsum, self.K_enr * Isum)
+            checks.append(self.pce_enrollment)
+            self.reference = 'enrollment'
+        self.pce = float(min(checks))
+        self.match = match_score(self.pce)
+        self.state = ('match' if self.pce >= PCE_MATCH else
+                      'mismatch' if self.pce <= PCE_MISMATCH else 'uncertain')
+        if self.state == 'match' and self.pce_session >= PCE_MATCH:
+            # Confirmed same camera: fold this crop into the session fingerprint
+            self._num += W * I; self._den += I * I
+            self._since_refresh = getattr(self, '_since_refresh', 0) + 1
+            if self._since_refresh >= 10:
+                self._refresh_k(); self._since_refresh = 0
+        # Which check failed tells the dashboard *what* changed
+        culprit = 'enrollment' if (self.pce_enrollment is not None and
+                                   self.pce_enrollment < self.pce_session) else 'session'
+        return {'pce': self.pce, 'match': self.match, 'state': self.state,
+                'reference': culprit, 'quality_ok': True,
+                'pce_session': self.pce_session, 'pce_enrollment': self.pce_enrollment}
+
+
+# ── Frame transport helpers (browser → server) ────────────────────────────────
+PRNU_MAGIC = b'DVPR'
+
+
+def parse_prnu_packet(data: bytes) -> Optional[Tuple[np.ndarray, int, int]]:
+    """
+    Binary frame tagged as a PRNU crop: b'DVPR' + uint16 camW + uint16 camH (big-endian)
+    + JPEG bytes of a native-resolution 320x240 centre crop. Returns (crop, camW, camH).
+    """
+    if len(data) < 9 or data[:4] != PRNU_MAGIC:
+        return None
+    cam_w = int.from_bytes(data[4:6], 'big'); cam_h = int.from_bytes(data[6:8], 'big')
+    img = cv2.imdecode(np.frombuffer(data[8:], np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    return img, cam_w, cam_h

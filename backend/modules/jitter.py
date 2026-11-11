@@ -54,6 +54,14 @@ class JitterAnalyzer:
         # Stats-level fallback
         self.webrtc_jitter_buffer: List[float] = []
 
+        # Camera frame timing (v2). The browser reports the interval between the
+        # camera's own frames (requestVideoFrameCallback captureTime/mediaTime).
+        # A real webcam delivers frames at a steady rate; a rendered or injected
+        # source shows irregular gaps. Server arrival times can't show this: the
+        # browser sends on its own 100 ms timer whatever the video source is.
+        self.cam_intervals: List[float] = []
+        self.cam_clock: str = ''
+
     def process_packet_timestamp(self, arrival_time: float):
         """
         Process a single packet arrival timestamp.
@@ -95,17 +103,57 @@ class JitterAnalyzer:
         """
         self.webrtc_jitter_buffer.append(jitter)
         self.running_jitter = jitter
-
-        # Synthesize IAT from jitter for CV computation
-        # This is an approximation — real packet capture is more accurate
-        if jitter > 0:
-            # Jitter represents IAT variation; reconstruct approximate IAT
-            base_iat = self.expected_iat
-            simulated_iat = base_iat + np.random.normal(0, jitter)
-            self.iat_buffer.append(max(0.001, simulated_iat))
+        # (v2: no longer synthesises random inter-arrival times from this value;
+        # that fed made-up numbers into the CV.)
 
         if len(self.webrtc_jitter_buffer) > 200:
             self.webrtc_jitter_buffer = self.webrtc_jitter_buffer[-100:]
+
+    def add_camera_intervals(self, intervals_ms: List[float], clock: str = ''):
+        """Intervals (ms) between consecutive camera frames, from the browser."""
+        self.cam_clock = clock or self.cam_clock
+        for v in intervals_ms or []:
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if 2.0 <= v <= 1000.0:          # ignore pauses (tab hidden, reconnect)
+                self.cam_intervals.append(v)
+        if len(self.cam_intervals) > 600:
+            self.cam_intervals = self.cam_intervals[-300:]
+
+    def compute_camera_metrics(self) -> Optional[Dict]:
+        """Regularity of the camera's frame timing over the last ~10 s.
+
+        cv = robust spread (1.4826 * MAD / median) + share of irregular frames
+        (gaps > 1.6x or bursts < 0.5x the typical interval). A steady webcam is
+        ~0.05; a frame-rate change in low light shifts the median, not the score.
+        Only scored when the browser has a real frame clock (capture/media time):
+        display-refresh timing ('display') wobbles by a vsync and is not used.
+        """
+        if len(self.cam_intervals) < 60:
+            return None
+        x = np.array(self.cam_intervals[-300:], dtype=float)
+        med = float(np.median(x))
+        if med <= 0:
+            return None
+        # Compare each interval with the typical interval around it (+-15 frames),
+        # so a legitimate frame-rate change (30 -> 15 fps in low light) is not
+        # mistaken for irregular timing.
+        k = 15
+        local = np.array([np.median(x[max(0, i - k):i + k + 1]) for i in range(len(x))])
+        r = x / np.maximum(local, 1e-6)
+        robust_cv = 1.4826 * float(np.median(np.abs(r - 1.0)))
+        irregular = float(np.mean((r > 1.6) | (r < 0.5)))
+        return {
+            'cv': round(robust_cv + irregular, 4),
+            'robust_cv': round(robust_cv, 4),
+            'irregular_frac': round(irregular, 4),
+            'fps': round(1000.0 / med, 1),
+            'clock': self.cam_clock,
+            'scored': self.cam_clock in ('capture', 'media'),
+            'frames_analyzed': int(len(x)),
+        }
 
     def compute_detection_metrics(self) -> Optional[Dict]:
         """

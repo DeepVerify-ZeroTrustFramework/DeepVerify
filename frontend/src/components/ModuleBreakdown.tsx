@@ -1,7 +1,7 @@
 import type { TrustBreakdown } from '../hooks/useTrustScore'
 import { Cpu, HeartPulse, Activity, Eye } from 'lucide-react'
 
-export default function ModuleBreakdown({ breakdown }: { breakdown?: TrustBreakdown }) {
+export default function ModuleBreakdown({ breakdown, uploadMode = false }: { breakdown?: TrustBreakdown; uploadMode?: boolean }) {
   const getStatusColor = (val: number, max: number) => {
     const ratio = (val ?? 0) / (max || 1)
     if (ratio >= 0.8) return '#1A6B3C' // Green
@@ -20,6 +20,24 @@ export default function ModuleBreakdown({ breakdown }: { breakdown?: TrustBreakd
     <div className="space-y-4">
       {modules.map((m) => {
         const Icon = m.icon
+        // Uploaded files have no live candidate or network stream: these two
+        // modules measure nothing there and are left out of the score.
+        if (uploadMode && (m.key === 'behavioral' || m.key === 'jitter')) {
+          return (
+            <div key={m.key} className="flex items-center gap-3 opacity-60">
+              <div className="w-8 h-8 rounded-lg bg-[#F7F7F8] flex items-center justify-center shrink-0">
+                <Icon size={16} className="text-[#9B9B9B]" />
+              </div>
+              <div className="flex-1">
+                <div className="flex justify-between items-end mb-1">
+                  <span className="text-[12px] font-semibold text-[#6B6B6B]">{m.label}</span>
+                  <span className="text-[11px] font-mono text-[#9B9B9B]">N/A - live sessions only</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-[#EFEFF0]" />
+              </div>
+            </div>
+          )
+        }
         const val = typeof m.val === 'number' && !isNaN(m.val) ? m.val : 0
         const color = getStatusColor(val, m.max)
         const width = `${Math.min(100, Math.max(0, (val / m.max) * 100))}%`

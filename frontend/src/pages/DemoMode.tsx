@@ -10,6 +10,36 @@ import ModuleBreakdown from '../components/ModuleBreakdown'
 import AlertFeed from '../components/AlertFeed'
 import { useTrustScore } from '../hooks/useTrustScore'
 import { getApiUrl, getWsUrl } from '../utils/apiConfig'
+import { startRppgCropStream } from '../utils/rppgCrop'
+
+// PRNU needs the video's own pixels: a 320x240 centre crop at NATIVE resolution
+// (no scaling), sent as b'DVPR' + width + height + JPEG. Called every 3rd tick.
+const prnuCropCanvas = document.createElement('canvas')
+prnuCropCanvas.width = 320
+prnuCropCanvas.height = 240
+function sendPrnuCrop(video: HTMLVideoElement, ws: WebSocket, tick: number) {
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  if (tick % 3 !== 0 || vw < 320 || vh < 240) return
+  const c = prnuCropCanvas.getContext('2d')
+  if (!c) return
+  try {
+    c.drawImage(video, Math.floor((vw - 320) / 2), Math.floor((vh - 240) / 2), 320, 240, 0, 0, 320, 240)
+    prnuCropCanvas.toBlob((blob) => {
+      if (!blob || ws.readyState !== WebSocket.OPEN) return
+      blob.arrayBuffer().then((jpeg) => {
+        const packet = new Uint8Array(8 + jpeg.byteLength)
+        packet.set([0x44, 0x56, 0x50, 0x52]) // 'DVPR'
+        new DataView(packet.buffer).setUint16(4, vw)
+        new DataView(packet.buffer).setUint16(6, vh)
+        packet.set(new Uint8Array(jpeg), 8)
+        if (ws.readyState === WebSocket.OPEN) ws.send(packet.buffer)
+      })
+    }, 'image/jpeg', 0.95)
+  } catch {
+    // ignore crop glitches
+  }
+}
 
 type DemoPhase = 'UPLOAD' | 'READY' | 'ANALYZING' | 'COMPLETE'
 
@@ -144,11 +174,14 @@ export default function DemoMode() {
       const ctx = canvas.getContext('2d')
 
       // Extract and send frames at 10 FPS
+      let tick = 0
       const interval = setInterval(() => {
         if (!frameWs || frameWs.readyState !== WebSocket.OPEN) return
         const video = videoRef.current
         if (!video || video.paused || video.ended || video.readyState < 2) return
 
+        tick += 1
+        sendPrnuCrop(video, frameWs, tick)
         try {
           ctx?.drawImage(video, 0, 0, 320, 240)
           canvas.toBlob(
@@ -171,6 +204,7 @@ export default function DemoMode() {
       }, 100) // 10 FPS
 
       frameIntervalRef.current = interval
+      startRppgCropStream(frameWs, () => videoRef.current)
     }
 
     frameWs.onerror = (err) => {
@@ -292,8 +326,11 @@ export default function DemoMode() {
         canvas.width = 320
         canvas.height = 240
 
+        let tick = 0
         const interval = setInterval(() => {
           if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return
+          tick += 1
+          sendPrnuCrop(videoRef.current, frameWs, tick)
           ctx.drawImage(videoRef.current, 0, 0, 320, 240)
           canvas.toBlob((blob) => {
             if (blob && frameWs.readyState === WebSocket.OPEN) {
@@ -305,6 +342,7 @@ export default function DemoMode() {
           }, 'image/jpeg', 0.7)
         }, 100)
         frameIntervalRef.current = interval
+        startRppgCropStream(frameWs, () => videoRef.current)
       }
 
       frameWs.onerror = () => setError('WebSocket connection failed.')
@@ -690,7 +728,7 @@ export default function DemoMode() {
                   <Activity size={16} className="text-[#A4123F]" />
                   <span className="text-[13px] font-bold text-[#0F0F0F]">Module Breakdown</span>
                 </div>
-                <ModuleBreakdown breakdown={breakdown} />
+                <ModuleBreakdown breakdown={breakdown} uploadMode />
               </div>
 
               {/* Alert Feed */}

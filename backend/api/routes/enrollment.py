@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List, Optional
 from models.schemas import RPPGBaseline, GazeBaseline
 from db.mongo import get_sessions_collection
-from modules.prnu import estimate_prnu_reference
+from modules.prnu import estimate_prnu_reference, PRNU_VERSION, CROP_W, CROP_H
 
 router = APIRouter()
 
@@ -21,15 +21,21 @@ _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_prnu_reference(session_id: str):
-    """Retrieve stored PRNU reference fingerprint."""
+    """
+    Retrieve the stored PRNU v2 enrollment fingerprint:
+        {'K': 2-D float array (CROP_H x CROP_W), 'width': camW, 'height': camH}
+    Legacy v1 fingerprints (prnu_<id>.npy, built from downscaled frames with the
+    old residual) are ignored — they cannot identify a camera.
+    """
     if session_id in _prnu_references:
         return _prnu_references[session_id]
-    npy_path = _UPLOADS_DIR / f"prnu_{session_id}.npy"
-    if npy_path.exists():
+    npz_path = _UPLOADS_DIR / f"prnu_v{PRNU_VERSION}_{session_id}.npz"
+    if npz_path.exists():
         try:
-            k = np.load(str(npy_path))
-            _prnu_references[session_id] = k
-            return k
+            z = np.load(str(npz_path))
+            ref = {'K': z['K'], 'width': int(z['width']), 'height': int(z['height'])}
+            _prnu_references[session_id] = ref
+            return ref
         except Exception as e:
             print(f"[PRNU] Error loading reference from disk: {e}")
     return None
@@ -37,10 +43,16 @@ def get_prnu_reference(session_id: str):
 
 @router.post("/enroll/{session_id}")
 @router.post("/sessions/{session_id}/enroll/prnu")
-async def enroll_prnu(session_id: str, frames: List[UploadFile] = File(...)):
+async def enroll_prnu(session_id: str, frames: List[UploadFile] = File(...),
+                      mode: str = Form("scaled"), cam_width: int = Form(0), cam_height: int = Form(0)):
     """
-    Receive enrollment frames (target: 30-90 I-frames) and compute PRNU reference K̂.
-    Each file is a JPEG image captured from the candidate's webcam.
+    Receive enrollment frames and compute the PRNU reference K̂.
+
+    mode="crop": each file is a native-resolution 320x240 centre crop of the
+    camera frame (no resampling) and cam_width/cam_height give the camera
+    resolution — this is the only mode that can fingerprint a sensor.
+    Legacy clients send downscaled frames (mode="scaled"): accepted, but no
+    fingerprint is stored and the interview builds one from its first seconds.
     """
     collection = get_sessions_collection()
     doc = await collection.find_one({"session_id": session_id})
@@ -60,8 +72,11 @@ async def enroll_prnu(session_id: str, frames: List[UploadFile] = File(...)):
         nparr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is not None:
-            # Resize to 320x240 for consistent and fast PRNU extraction
-            img = cv2.resize(img, (320, 240))
+            if mode == "crop":
+                if img.shape[:2] != (CROP_H, CROP_W):
+                    continue  # crops must be exact native patches
+            else:
+                img = cv2.resize(img, (CROP_W, CROP_H))
             decoded_frames.append(img)
 
     if len(decoded_frames) < 5:
@@ -70,20 +85,35 @@ async def enroll_prnu(session_id: str, frames: List[UploadFile] = File(...)):
             detail=f"Only {len(decoded_frames)} frames decoded successfully. Need at least 5."
         )
 
-    # Compute PRNU reference fingerprint K̂ via MLE estimator
-    K_hat = estimate_prnu_reference(decoded_frames)
+    if mode != "crop" or cam_width <= 0 or cam_height <= 0:
+        # Downscaled frames carry no usable sensor pattern — don't store a fingerprint
+        await collection.update_one(
+            {"session_id": session_id},
+            {"$set": {"enrollment.prnu_enrolled_frames": len(decoded_frames),
+                      "enrollment.prnu_mode": "scaled-legacy"}}
+        )
+        return {
+            "message": "Frames received (legacy scaled mode) — fingerprint will be built during the interview",
+            "frames_processed": len(decoded_frames),
+        }
+
+    # Compute PRNU reference fingerprint K̂ via MLE estimator (v2 residual)
+    K_hat = estimate_prnu_reference(decoded_frames)[:, :, 1].astype(np.float32)
+    ref = {'K': K_hat, 'width': int(cam_width), 'height': int(cam_height)}
 
     # Store reference in memory and on disk
-    _prnu_references[session_id] = K_hat
-    npy_path = _UPLOADS_DIR / f"prnu_{session_id}.npy"
-    np.save(str(npy_path), K_hat)
+    _prnu_references[session_id] = ref
+    npz_path = _UPLOADS_DIR / f"prnu_v{PRNU_VERSION}_{session_id}.npz"
+    np.savez_compressed(str(npz_path), K=K_hat, width=int(cam_width), height=int(cam_height))
 
     # Update session document
     await collection.update_one(
         {"session_id": session_id},
         {"$set": {
-            "enrollment.prnu_reference_path": str(npy_path),
+            "enrollment.prnu_reference_path": str(npz_path),
             "enrollment.prnu_enrolled_frames": len(decoded_frames),
+            "enrollment.prnu_mode": "crop",
+            "enrollment.prnu_camera_resolution": [int(cam_width), int(cam_height)],
         }}
     )
 
@@ -91,6 +121,7 @@ async def enroll_prnu(session_id: str, frames: List[UploadFile] = File(...)):
         "message": "PRNU enrollment complete",
         "frames_processed": len(decoded_frames),
         "reference_shape": list(K_hat.shape),
+        "camera_resolution": [int(cam_width), int(cam_height)],
     }
 
 

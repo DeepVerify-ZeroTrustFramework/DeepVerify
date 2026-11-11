@@ -5,6 +5,7 @@ WebSocket handlers for real-time candidate telemetry and dashboard updates.
 /ws/dashboard/{session_id} — Pushes trust updates + alerts to interviewer
 """
 import json
+import time
 import asyncio
 from typing import Dict, Optional
 from datetime import datetime
@@ -159,6 +160,17 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
         behavioral_score=behavioral_score,
         thresholds=thresholds,
         camera_active=cam_active,
+        source='webrtc',
+        hr_bpm=telemetry["last_hr_bpm"],
+        liveness_failed=telemetry.get("liveness_failed", False),
+        prnu_match=(1.0 if telemetry.get("prnu_excused") else telemetry.get("prnu_match")),
+        prnu_state=telemetry.get("prnu_state", "waiting"),
+        amplitude=telemetry.get("last_amplitude", 0.1),
+        scr=telemetry.get("last_scr", 0.5),
+        spectral_flatness=telemetry.get("last_flatness", 0.3),
+        frame_pixels=telemetry.get("last_frame_pixels", 320 * 240),
+        rppg_good_frac=(1.0 if telemetry.get("rppg_excused") else telemetry.get("rppg_good_frac")),
+        pulse_mismatch=(False if telemetry.get("rppg_excused") else bool(telemetry.get("pulse_mismatch", False))),
     )
 
     # Filter out acknowledged alerts from list
@@ -338,12 +350,19 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                     telemetry["_reflection_alert_cooldown"] -= 1
 
                 # 4. Head Pose & Gaze Deviation
-                recent_3_yaw = telemetry["yaw_readings"][-3:]
+                # Measured against the candidate's own usual pose (a laptop camera
+                # that sits off-centre makes a frontal face read ~10 deg), and only
+                # a clear, held turn counts: > 25 deg for 3 readings in a row.
+                yaws = telemetry["yaw_readings"]
+                recent_3_yaw = yaws[-3:]
                 is_head_turn = False
                 avg_yaw = 0.0
                 if len(recent_3_yaw) >= 3:
-                    avg_yaw = sum(abs(y) for y in recent_3_yaw) / len(recent_3_yaw)
-                    if avg_yaw > 10.0:
+                    hist_yaw = sorted(yaws[-150:])
+                    base_yaw = hist_yaw[len(hist_yaw) // 2] if len(hist_yaw) >= 30 else 0.0
+                    devs = [abs(y - base_yaw) for y in recent_3_yaw]
+                    avg_yaw = sum(devs) / len(devs)
+                    if min(devs) > 25.0:
                         is_head_turn = True
 
                 recent_10_delta = telemetry["gaze_deltas"][-10:]
@@ -354,7 +373,8 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                     if avg_delta > 0.15:
                         is_gaze_anomaly = True
 
-                if (is_head_turn or is_gaze_anomaly) and not is_absent:
+                in_liveness_challenge = time.time() < telemetry.get("_liveness_quiet_until", 0.0)
+                if (is_head_turn or is_gaze_anomaly) and not is_absent and not in_liveness_challenge:
                     gaze_alert_count = telemetry.get("_gaze_alert_cooldown", 0)
                     if gaze_alert_count <= 0:
                         desc = f"Extreme head turn detected ({avg_yaw:.1f}°)" if is_head_turn else f"Sustained off-screen gaze detected (Δ={avg_delta:.3f})"
@@ -639,6 +659,17 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 behavioral_score=behavioral_score,
                 thresholds=thresholds,
                 camera_active=cam_active,
+                source='webrtc',
+                hr_bpm=telemetry["last_hr_bpm"],
+                liveness_failed=telemetry.get("liveness_failed", False),
+                prnu_match=(1.0 if telemetry.get("prnu_excused") else telemetry.get("prnu_match")),
+                prnu_state=telemetry.get("prnu_state", "waiting"),
+                amplitude=telemetry.get("last_amplitude", 0.1),
+                scr=telemetry.get("last_scr", 0.5),
+                spectral_flatness=telemetry.get("last_flatness", 0.3),
+                frame_pixels=telemetry.get("last_frame_pixels", 320 * 240),
+                rppg_good_frac=(1.0 if telemetry.get("rppg_excused") else telemetry.get("rppg_good_frac")),
+                pulse_mismatch=(False if telemetry.get("rppg_excused") else bool(telemetry.get("pulse_mismatch", False))),
             )
 
             # Filter out acknowledged alerts so they do not continuously re-alert

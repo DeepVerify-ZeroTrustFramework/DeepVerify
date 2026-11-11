@@ -4,7 +4,8 @@ import {
   ShieldCheck, Loader2, Code2, AlertCircle, Clock, AlertTriangle,
   Monitor, Users, Smartphone, Maximize2, Minimize2, Camera,
   CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home,
-  Mic, MicOff, Video, VideoOff, Eye, EyeOff, Play, Terminal, Check
+  Mic, MicOff, Video, VideoOff, Eye, EyeOff, Play, Terminal, Check,
+  ArrowLeft, ArrowRight
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
@@ -15,6 +16,8 @@ import GazeCapturer from '../components/GazeCapturer'
 import type { GazeData } from '../components/GazeCapturer'
 import ObjectDetector from '../components/ObjectDetector'
 import type { ProhibitedObject } from '../components/ObjectDetector'
+import { startRppgCropStream } from '../utils/rppgCrop'
+import { startFrameTiming } from '../utils/frameTiming'
 
 // ── Language templates ──
 const LANGUAGE_TEMPLATES: Record<string, { lang: string; template: string }> = {
@@ -118,6 +121,14 @@ export default function CandidateSession() {
 
   const frameWsRef = useRef<WebSocket | null>(null)
   const frameIntervalRef = useRef<any>(null)
+
+  // ── Active liveness challenge (issued + verified by the server on the frames socket) ──
+  const [livenessChallenge, setLivenessChallenge] = useState<null | {
+    id: string; step: number; of: number; direction: 'LEFT' | 'RIGHT'
+    instruction: string; timeoutMs: number; retry: boolean; key: number
+  }>(null)
+  const [livenessResult, setLivenessResult] = useState<null | { passed: boolean; message: string }>(null)
+  const livenessResultTimerRef = useRef<any>(null)
 
   // Candidate local media controls
   const [camEnabled, setCamEnabled] = useState(true)
@@ -278,6 +289,34 @@ export default function CandidateSession() {
     frameWsRef.current = frameWs
     frameWs.binaryType = 'arraybuffer'
 
+    // Server → candidate messages on the same socket (liveness challenges)
+    frameWs.onmessage = (event) => {
+      if (typeof event.data !== 'string') return
+      let msg: any
+      try { msg = JSON.parse(event.data) } catch { return }
+      if (msg.type === 'LIVENESS_CHALLENGE') {
+        setLivenessResult(null)
+        setLivenessChallenge({
+          id: msg.challenge_id, step: msg.step, of: msg.of,
+          direction: msg.direction === 'RIGHT' ? 'RIGHT' : 'LEFT',
+          instruction: msg.instruction, timeoutMs: msg.timeout_ms || 6000,
+          retry: !!msg.retry, key: Date.now(),
+        })
+        // Spoken prompt too, in case the candidate is looking at the code editor
+        try {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel()
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(msg.instruction))
+          }
+        } catch { /* speech is optional */ }
+      } else if (msg.type === 'LIVENESS_CHALLENGE_RESULT') {
+        setLivenessChallenge(null)
+        setLivenessResult({ passed: !!msg.passed, message: msg.message || '' })
+        if (livenessResultTimerRef.current) clearTimeout(livenessResultTimerRef.current)
+        livenessResultTimerRef.current = setTimeout(() => setLivenessResult(null), 4000)
+      }
+    }
+
     frameWs.onopen = () => {
       console.log('[Frames WS] Connected for real-time PRNU & rPPG forensic analysis')
 
@@ -286,12 +325,44 @@ export default function CandidateSession() {
       canvas.height = 240
       const ctx = canvas.getContext('2d')
 
+      // PRNU needs the camera's own pixels: a 320x240 centre crop at NATIVE
+      // resolution (no scaling), sent ~3x/s as b'DVPR' + camW + camH + JPEG.
+      const prnuCanvas = document.createElement('canvas')
+      prnuCanvas.width = 320
+      prnuCanvas.height = 240
+      const prnuCtx = prnuCanvas.getContext('2d')
+      let tick = 0
+
       // 100ms interval = 10 FPS
       const frameInterval = setInterval(() => {
         if (!camEnabledRef.current) return // Do NOT capture or transmit frames when camera is disabled
         if (!frameWs || frameWs.readyState !== WebSocket.OPEN) return
         const video = selfVideoRef.current
         if (!video || video.readyState < 2) return
+
+        tick += 1
+        const vw = video.videoWidth
+        const vh = video.videoHeight
+        if (tick % 3 === 0 && prnuCtx && vw >= 320 && vh >= 240) {
+          try {
+            prnuCtx.drawImage(video, Math.floor((vw - 320) / 2), Math.floor((vh - 240) / 2), 320, 240, 0, 0, 320, 240)
+            prnuCanvas.toBlob((blob) => {
+              if (!blob || frameWs.readyState !== WebSocket.OPEN || !camEnabledRef.current) return
+              blob.arrayBuffer().then((jpeg) => {
+                const header = new Uint8Array(8)
+                header.set([0x44, 0x56, 0x50, 0x52]) // 'DVPR'
+                new DataView(header.buffer).setUint16(4, vw)
+                new DataView(header.buffer).setUint16(6, vh)
+                const packet = new Uint8Array(8 + jpeg.byteLength)
+                packet.set(header, 0)
+                packet.set(new Uint8Array(jpeg), 8)
+                if (frameWs.readyState === WebSocket.OPEN && camEnabledRef.current) frameWs.send(packet.buffer)
+              })
+            }, 'image/jpeg', 0.95)
+          } catch {
+            // ignore crop glitches
+          }
+        }
 
         try {
           ctx?.drawImage(video, 0, 0, 320, 240)
@@ -313,6 +384,11 @@ export default function CandidateSession() {
         }
       }, 100)
       frameIntervalRef.current = frameInterval
+
+      // rPPG: ~15 fps native-resolution face crops (stops when the socket closes)
+      startRppgCropStream(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
+      // Jitter: the camera's own frame timing
+      startFrameTiming(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
     }
 
     frameWs.onerror = (err) => {
@@ -361,6 +437,11 @@ export default function CandidateSession() {
       }
     }
     const handleVisibilityChange = () => {
+      // Tell the server so a liveness check pauses instead of failing
+      const fws = frameWsRef.current
+      if (fws && fws.readyState === WebSocket.OPEN) {
+        fws.send(JSON.stringify({ type: 'TAB_VISIBILITY', hidden: document.hidden }))
+      }
       if (document.hidden) {
         addViolationToast('Tab switched or minimized — integrity warning logged.', 'TAB_SWITCH')
         setShowTabWarning(true)
@@ -815,6 +896,44 @@ export default function CandidateSession() {
             <Check size={18} />
             <span>I Understand, Return to Interview</span>
           </button>
+        </div>
+      )}
+
+      {/* ACTIVE LIVENESS CHALLENGE — shown above every other overlay so it can't be missed */}
+      {livenessChallenge && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,500px)] pointer-events-none animate-fade-in">
+          <style>{`@keyframes dvLivenessCountdown { from { width: 100%; } to { width: 0%; } }`}</style>
+          <div className="rounded-2xl bg-[#0F1115]/95 border border-[#A4123F] shadow-2xl shadow-[#A4123F]/30 px-6 py-5 text-center">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-gray-400 mb-3">
+              Liveness check · step {livenessChallenge.step} of {livenessChallenge.of}
+              {livenessChallenge.retry ? ' · second try' : ''}
+            </p>
+            <div className="flex items-center justify-center gap-4 mb-3">
+              {livenessChallenge.direction === 'LEFT' && <ArrowLeft size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
+              <p className="text-2xl font-bold text-white">{livenessChallenge.instruction}</p>
+              {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
+            </div>
+            <p className="text-[12px] text-gray-400 mb-3">Turn clearly, then face the screen again. Keep your face in view.</p>
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div
+                key={livenessChallenge.key}
+                className="h-full bg-[#A4123F]"
+                style={{ animation: `dvLivenessCountdown ${livenessChallenge.timeoutMs}ms linear forwards` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      {livenessResult && !livenessChallenge && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,460px)] pointer-events-none animate-fade-in">
+          <div className={`rounded-2xl px-5 py-4 flex items-center gap-3 shadow-2xl border ${
+            livenessResult.passed ? 'bg-[#06210F]/95 border-emerald-500/60' : 'bg-[#2A1A05]/95 border-amber-500/60'
+          }`}>
+            {livenessResult.passed
+              ? <CheckCircle2 size={22} className="text-emerald-400 shrink-0" />
+              : <AlertTriangle size={22} className="text-amber-400 shrink-0" />}
+            <p className="text-sm text-white">{livenessResult.message}</p>
+          </div>
         </div>
       )}
 

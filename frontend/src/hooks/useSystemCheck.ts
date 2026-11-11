@@ -267,19 +267,33 @@ export function useSystemCheck(sessionId: string) {
       const ctx = canvas.getContext('2d')
       if (!ctx) return false
 
+      // Wait until the camera reports its real resolution
+      for (let w = 0; w < 20 && (!video.videoWidth || !video.videoHeight); w++) {
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      const camW = video.videoWidth
+      const camH = video.videoHeight
+      // PRNU needs native sensor pixels: take a 320x240 centre CROP (no scaling).
+      // Same crop + quality as the live interview stream (CandidateSession.tsx).
+      const nativeCrop = camW >= 320 && camH >= 240
+
       const blobs: Blob[] = []
       const targetFrames = 30
 
       for (let i = 0; i < targetFrames; i++) {
-        ctx.drawImage(video, 0, 0, 320, 240)
+        if (nativeCrop) {
+          ctx.drawImage(video, Math.floor((camW - 320) / 2), Math.floor((camH - 240) / 2), 320, 240, 0, 0, 320, 240)
+        } else {
+          ctx.drawImage(video, 0, 0, 320, 240)
+        }
         const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob(resolve, 'image/jpeg', 0.85)
+          canvas.toBlob(resolve, 'image/jpeg', nativeCrop ? 0.95 : 0.85)
         })
         if (blob) {
           blobs.push(blob)
         }
         setPrnuFrames(Math.round(((i + 1) / targetFrames) * 90))
-        await new Promise((r) => setTimeout(r, 70))
+        await new Promise((r) => setTimeout(r, 120))
       }
 
       video.pause()
@@ -294,6 +308,9 @@ export function useSystemCheck(sessionId: string) {
       blobs.forEach((b, idx) => {
         formData.append('frames', b, `frame_${idx}.jpg`)
       })
+      formData.append('mode', nativeCrop ? 'crop' : 'scaled')
+      formData.append('cam_width', String(camW || 0))
+      formData.append('cam_height', String(camH || 0))
 
       const res = await fetch(`/api/enroll/${sessionId}`, {
         method: 'POST',
