@@ -137,8 +137,7 @@ export default function CandidateSession() {
     instruction: string; note: string | null; origin: string; key: number
   }>(null)
   const [livenessFailNotice, setLivenessFailNotice] = useState<string | null>(null)
-  const [framesReady, setFramesReady] = useState(false)
-  const startLivenessSentRef = useRef(false)
+
   const [livenessResult, setLivenessResult] = useState<null | { passed: boolean; message: string }>(null)
   const livenessResultTimerRef = useRef<any>(null)
 
@@ -343,7 +342,6 @@ export default function CandidateSession() {
 
     frameWs.onopen = () => {
       console.log('[Frames WS] Connected for real-time PRNU & rPPG forensic analysis')
-      setFramesReady(true)
 
       const canvas = document.createElement('canvas')
       canvas.width = 320
@@ -427,7 +425,7 @@ export default function CandidateSession() {
 
     frameWs.onclose = () => {
       console.log('[Frames WS] Disconnected')
-      setFramesReady(false)
+
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
     }
 
@@ -486,15 +484,8 @@ export default function CandidateSession() {
     }
   }, [addViolationToast])
 
-  // Start-of-interview liveness check: once identity is verified, the page is in
-  // full screen and the frames socket is up. Sent once per page load.
-  useEffect(() => {
-    if (!faceVerified || !isFullscreen || !framesReady || startLivenessSentRef.current) return
-    const fws = frameWsRef.current
-    if (!fws || fws.readyState !== WebSocket.OPEN) return
-    startLivenessSentRef.current = true
-    fws.send(JSON.stringify({ type: 'LIVENESS_START' }))
-  }, [faceVerified, isFullscreen, framesReady])
+  // Liveness head-turn checks are switched off for interviews (demo pages only).
+  // The panel below stays dormant: the server never issues a check here.
 
   const skipLiveness = useCallback(() => {
     const fws = frameWsRef.current

@@ -99,10 +99,32 @@ export function useTrustScore(sessionId: string) {
   useEffect(() => {
     if (!sessionId) return
 
+    // Keep the interviewer's live connection up. It used to connect once and never
+    // reconnect, so after any drop (server error, Render proxy timeout, network
+    // blip) no more alerts arrived while video and code (peer-to-peer) still worked.
+    // On reconnect the server re-sends the current alerts and score history.
+    let closed = false
+    let retry = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    const connect = () => {
+    if (closed) return
     const wsUrl = getWsUrl(`/ws/dashboard/${sessionId}`)
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
+
+    ws.onopen = () => {
+      retry = 0
+      console.log('[Dashboard] Connected')
+    }
+    ws.onclose = (e) => {
+      if (wsRef.current === ws) wsRef.current = null
+      if (closed) return
+      const delay = Math.min(10000, 500 * 2 ** retry++)
+      console.warn(`[Dashboard] Disconnected (code ${e.code}) - reconnecting in ${delay}ms`)
+      retryTimer = setTimeout(connect, delay)
+    }
 
     ws.onmessage = (event) => {
       try {
@@ -220,15 +242,22 @@ export function useTrustScore(sessionId: string) {
       }
     }
 
+    }
+    connect()
+
     const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }))
       }
-    }, 30000)
+    }, 20000)
 
     return () => {
+      closed = true
       clearInterval(pingInterval)
-      ws.close()
+      if (retryTimer) clearTimeout(retryTimer)
+      wsRef.current?.close()
+      wsRef.current = null
     }
   }, [sessionId])
 

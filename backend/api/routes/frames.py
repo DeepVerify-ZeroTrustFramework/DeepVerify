@@ -199,6 +199,8 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                 # Text message: JSON behavioral event or gaze data
                 try:
                     msg = json.loads(data['text'])
+                    if msg.get('type') in ('LIVENESS_REQUEST', 'LIVENESS_START') and not analyzers.get('is_demo'):
+                        continue    # liveness checks are switched off for interviews (demo only)
                     if msg.get('type') in ('LIVENESS_REQUEST', 'LIVENESS_START'):
                         # LIVENESS_START: candidate page, once identity check + full
                         # screen are done. LIVENESS_REQUEST: live-demo button.
@@ -455,7 +457,7 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_FINGERPRINT_CHANGE', 'MEDIUM', 'PRNU',
             f'Live video no longer matches the camera fingerprint of {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
-            + ('— running a liveness check' if analyzers.get('is_demo') else '— consider running a liveness check'), float(decision['pce'])))
+            + ('— running a liveness check' if analyzers.get('is_demo') else '— verifying identity'), float(decision['pce'])))
         _request_liveness(analyzers)
     elif streak == 60:
         await _publish_once(session_id, analyzers, _make_alert(
@@ -763,9 +765,8 @@ async def request_liveness_from_interviewer(session_id: str) -> str:
     analyzers = _session_analyzers.get(session_id)
     if analyzers is None:
         return 'no_candidate'
-    if analyzers.get('is_demo'):
-        return 'unavailable'   # demo pages keep their own automatic checks
-    return await _start_liveness(session_id, analyzers, 'interviewer')
+    # Liveness checks are switched off for interviews (demo pages only).
+    return 'unavailable'
 
 
 async def _publish_liveness_status(session_id: str, data: dict):

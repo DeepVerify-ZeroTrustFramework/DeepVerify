@@ -6,6 +6,7 @@ WebSocket handlers for real-time candidate telemetry and dashboard updates.
 """
 import json
 import time
+import uuid
 import asyncio
 from typing import Dict, Optional
 from datetime import datetime
@@ -266,20 +267,25 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
 async def _push_to_dashboard(session_id: str, message: dict):
     """Publish a message to the connected interviewer dashboard via Redis."""
     if message.get("type") == "ALERT":
-        try:
-            alerts_col = get_alerts_collection()
-            alert_id = message.get("alertId") or message.get("alert_id")
-            existing = await alerts_col.find_one({"$or": [{"alertId": alert_id}, {"alert_id": alert_id}]})
-            if not existing:
-                await alerts_col.insert_one({
+        # Alert ids were "<kind>-<unix seconds>": two Ctrl+C presses in the same
+        # second got the SAME id and the dashboard dropped the second as a
+        # duplicate (and the DB kept only one). Make every id unique.
+        base_id = message.get("alertId") or message.get("alert_id") or "alert"
+        alert_id = f"{base_id}-{uuid.uuid4().hex[:6]}"
+        message = {**message, "alertId": alert_id, "alert_id": alert_id}
+        # Show it to the interviewer first; store it without blocking.
+        await publish_alert(session_id, message)
+
+        async def _store(doc=dict(message)):
+            try:
+                await get_alerts_collection().insert_one({
                     "session_id": session_id,
                     "acknowledged": False,
-                    **message,
+                    **doc,
                 })
-        except Exception as err:
-            print(f"[Alert DB Insert Error]: {err}")
-
-        await publish_alert(session_id, message)
+            except Exception as err:
+                print(f"[Alert DB Insert Error]: {err}")
+        _fire_and_forget(_store())
     else:
         await publish_trust_score(session_id, message)
 

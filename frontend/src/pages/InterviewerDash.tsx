@@ -57,7 +57,7 @@ export default function InterviewerDash() {
   }
 
   // Initialize WebSockets for dashboard data (including live codeSync & score reversion)
-  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert, clearAlerts, clearedCount, liveness, livenessNotice, runLivenessCheck } = useTrustScore(sessionId || '')
+  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert, clearAlerts, clearedCount } = useTrustScore(sessionId || '')
 
   // Code arriving peer-to-peer over the WebRTC data channel (fastest path).
   // Whichever copy (P2P or WebSocket) has the higher seq wins.
@@ -513,36 +513,6 @@ export default function InterviewerDash() {
                     </button>
                   </div>
                 )}
-              </div>
-              {/* Liveness check: status + on-demand button. Results only inform the
-                  interviewer; nothing here stops the interview. */}
-              <div className="px-4 py-3 border-b border-[#E4E4E6] bg-white">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold text-[#6B6B6B] uppercase tracking-wide">Liveness check</p>
-                    <p className={`text-[12px] font-bold truncate ${
-                      liveness.state === 'passed' ? 'text-[#1A6B3C]'
-                        : liveness.state === 'failed' ? 'text-[#991B1B]'
-                        : liveness.state === 'skipped' ? 'text-[#B45309]'
-                        : 'text-[#0F0F0F]'}`}>
-                      {liveness.state === 'none' && 'Not run yet in this view'}
-                      {liveness.state === 'requested' && 'Sent to candidate…'}
-                      {liveness.state === 'active' && `In progress${liveness.origin === 'start' ? ' (start of interview)' : ''}`}
-                      {liveness.state === 'passed' && `Passed${typeof liveness.reactionS === 'number' ? ` · ${liveness.reactionS.toFixed(1)}s reaction` : ''}${liveness.wrongAttempts ? ` · ${liveness.wrongAttempts} wrong attempts` : ''}`}
-                      {liveness.state === 'failed' && `Failed · ${liveness.wrongAttempts ?? 0} wrong attempts (still open)`}
-                      {liveness.state === 'skipped' && 'Closed by candidate'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={runLivenessCheck}
-                    disabled={liveness.state === 'active'}
-                    title="Show a head-turn liveness check on the candidate's screen now"
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-[#A4123F] hover:bg-[#850E32] disabled:bg-[#E4E4E6] disabled:text-[#6B6B6B] disabled:cursor-not-allowed text-white text-[11px] font-bold transition-colors"
-                  >
-                    Run liveness check
-                  </button>
-                </div>
-                {livenessNotice && <p className="mt-1.5 text-[11px] text-[#6B6B6B]">{livenessNotice}</p>}
               </div>
               <div className="flex-1 overflow-y-auto p-4 bg-[#F7F7F8]">
                 <AlertFeed alerts={alerts || []} onAcknowledge={acknowledgeAlert} />
