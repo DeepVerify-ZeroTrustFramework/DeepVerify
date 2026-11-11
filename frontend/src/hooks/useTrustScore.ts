@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { getWsUrl } from '../utils/apiConfig'
 
+export interface LivenessState {
+  // none | requested | active | passed | failed | skipped
+  state: string
+  origin?: string
+  wrongAttempts?: number
+  reactionS?: number
+  at?: string
+}
+
 export interface TrustAlert {
   alertId: string
   alertType: string
@@ -71,6 +80,11 @@ export function useTrustScore(sessionId: string) {
   // Start with EMPTY alerts per BUG 3 FIX
   const [alerts, setAlerts] = useState<TrustAlert[]>([])
   const [status, setStatus] = useState<string>('WAITING')
+  // Alerts the interviewer cleared from the feed (still counted in totals)
+  const [clearedCount, setClearedCount] = useState(0)
+  // Live state of the candidate's liveness check (see backend frames.py)
+  const [liveness, setLiveness] = useState<LivenessState>({ state: 'none' })
+  const [livenessNotice, setLivenessNotice] = useState<string | null>(null)
 
   // Synchronized candidate code editor & compiler state
   const [codeSync, setCodeSync] = useState<CodeSyncState>({
@@ -134,6 +148,23 @@ export function useTrustScore(sessionId: string) {
             if (prev.find(a => a.alertId === alert.alertId)) return prev
             return [alert, ...prev]
           })
+        }
+        else if (msg.type === 'LIVENESS_STATUS') {
+          setLiveness({
+            state: msg.state || 'none',
+            origin: msg.origin || undefined,
+            wrongAttempts: typeof msg.wrong_attempts === 'number' ? msg.wrong_attempts : undefined,
+            reactionS: typeof msg.reaction_s === 'number' ? msg.reaction_s : undefined,
+            at: msg.timestamp,
+          })
+        }
+        else if (msg.type === 'COMMAND_ACK' && msg.command === 'RUN_LIVENESS') {
+          setLivenessNotice(msg.message || null)
+          if (msg.result === 'started') setLiveness(prev => ({ ...prev, state: 'requested', origin: 'interviewer' }))
+          setTimeout(() => setLivenessNotice(null), 5000)
+        }
+        else if (msg.type === 'ALERTS_CLEARED_COUNT' && typeof msg.count === 'number') {
+          setClearedCount(msg.count)
         }
         else if (msg.type === 'EXISTING_ALERTS' && Array.isArray(msg.alerts)) {
           setAlerts(msg.alerts.map(normalizeAlert))
@@ -214,6 +245,28 @@ export function useTrustScore(sessionId: string) {
     setAlerts(prev => prev.filter(a => a.alertId !== alertId && (a as any).alert_id !== alertId))
   }
 
+  // Interviewer button: open a liveness check on the candidate's screen now.
+  const runLivenessCheck = () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'RUN_LIVENESS' }))
+    } else {
+      setLivenessNotice('Dashboard is not connected - try again in a moment')
+      setTimeout(() => setLivenessNotice(null), 5000)
+    }
+  }
+
+  // Clear the anomaly feed. Purely visual: alerts are not excused and the trust
+  // score is untouched. The server remembers it so a page refresh stays clean.
+  const clearAlerts = () => {
+    const ids = alerts.map(a => a.alertId || (a as any).alert_id).filter(Boolean)
+    if (ids.length === 0) return
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'CLEAR_ALERTS', alert_ids: ids }))
+    }
+    setClearedCount(c => c + ids.length)
+    setAlerts(prev => prev.filter(a => !ids.includes(a.alertId || (a as any).alert_id)))
+  }
+
   return {
     score,
     inconclusive,
@@ -222,6 +275,11 @@ export function useTrustScore(sessionId: string) {
     alerts,
     status,
     codeSync,
-    acknowledgeAlert
+    acknowledgeAlert,
+    clearAlerts,
+    clearedCount,
+    liveness,
+    livenessNotice,
+    runLivenessCheck,
   }
 }

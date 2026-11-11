@@ -9,18 +9,16 @@ the frames the server actually receives (not from browser-reported numbers, so a
 tampered page can't fake a pass).
 
 Flow (per session, driven by frames.py):
-    ChallengeManager.on_frame(frame_bgr, now) -> list of messages to send to the
-    candidate on the frames WebSocket, plus state changes the caller turns into
-    alerts / trust-score effects.
+    A check is requested (start of interview, interviewer button, or automatic
+    in the live demo), then ChallengeManager.on_frame(frame_bgr, now) returns
+    messages for the candidate and events the caller turns into alerts.
 
-Rules for a step to pass (all must hold):
-  * face visible and roughly frontal when the step is issued (or within the
-    first 1.5 s of it), so a video that is already turned can't pass instantly;
-  * yaw moves past +THRESH in the requested direction for >= 2 consecutive
-    frames, no earlier than MIN_LATENCY after the instruction (human reaction);
-  * the head did not first turn clearly the WRONG way during the step.
-A challenge = 2 steps (LEFT/RIGHT in random order). One retry is given after a
-failure; a second consecutive failure is a confirmed FAIL.
+Rules: no time limit. A step starts counting once the candidate faces the
+camera; it passes when the head turns >= THRESH the requested way for CONSEC
+frames. A clear, held turn the other way is a wrong attempt (new random
+direction). MAX_WRONG wrong attempts -> the interviewer is told it failed, but
+the check stays open. The candidate may close it (skip). Mirrored cameras are
+handled: the first check learns the orientation from a consistent sequence.
 """
 from __future__ import annotations
 
@@ -37,22 +35,15 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Tunables (seconds / normalised yaw units) ─────────────────────────────────
-FIRST_DELAY = float(os.getenv('DV_LIVENESS_FIRST_DELAY', '25'))     # after face first seen
+# Automatic checks (live demo only; real interviews run on request)
+FIRST_DELAY = float(os.getenv('DV_LIVENESS_FIRST_DELAY', '25'))
 INTERVAL_MIN = float(os.getenv('DV_LIVENESS_INTERVAL_MIN', '120'))
 INTERVAL_MAX = float(os.getenv('DV_LIVENESS_INTERVAL_MAX', '240'))
-STEP_TIMEOUT = 8.0          # time allowed per step (UI countdown)
-MAX_LATENCY = 5.0           # the turn must happen within this. Humans take ~1–2 s, plus ~2 s
-                            # to hear the spoken prompt and network/frame delay
-N_STEPS = 3
-STILL_STD = 0.035           # yaw std over the 1.5 s before a challenge = 'holding still'
-STILL_WAIT = 8.0            # wait up to this long for a still moment, then issue anyway
-NO_FACE_WAIT = 15.0         # challenge due but no face: wait this long, then issue anyway (fails closed)
-MIN_LATENCY = 0.25          # faster than this is not a human reacting
-RETRY_DELAY = 4.0
-THRESH = 0.13               # yaw change needed (≈ 20–25° head turn)
-WRONG_WAY = 0.16            # clear turn the wrong way first = fail
-FRONTAL_MAX = 0.10          # |yaw - baseline| considered "facing front"
-CONSEC = 2
+MIN_LATENCY = 0.25          # faster than this after facing front is not a human reacting
+THRESH = 0.13               # yaw change needed (about a 20-25 deg head turn)
+WRONG_WAY = 0.16            # a held turn this far the other way = wrong attempt
+FRONTAL_MAX = 0.10          # |yaw - normal pose| considered "facing front"
+CONSEC = 3                  # frames past THRESH needed for a step to pass (~0.3 s held)
 ENABLED = os.getenv('DV_LIVENESS_CHALLENGES', '1') == '1'
 
 INSTRUCTIONS = {
@@ -129,23 +120,41 @@ def make_yaw_estimator() -> Optional[Callable]:
 
 
 # ── Challenge state machine ──────────────────────────────────────────────────
+#
+# A check runs only when asked for: once at the start of the interview (the
+# candidate's page asks as soon as identity verification and full screen are
+# done) and whenever the interviewer presses "Run liveness check". The live
+# demo additionally schedules automatic checks (auto=True).
+#
+# There is NO time limit. Each step waits until the candidate faces the camera
+# ("armed"), then until they turn in the requested direction. A clear, held turn
+# the other way is a wrong attempt: the candidate gets a new random direction.
+# After MAX_WRONG wrong attempts the interviewer is told the check failed, but
+# the check stays open and the candidate may still pass it. The candidate can
+# close it at any time (skip); the interviewer is told about that too.
+# Nothing here ever stops the interview.
+
+N_STEPS_KNOWN = 2           # steps once the camera orientation is known
+N_STEPS_UNKNOWN = 3         # first check: step 1 also learns mirrored/normal
+MAX_WRONG = 3               # wrong-direction attempts before "failed" is reported
+ARM_FRAMES = 3              # frames facing front before a step starts counting
+WRONG_CONSEC = 3            # a wrong turn must be held this many frames
+POSE_WINDOW = 20.0          # seconds of normal-pose history used as "front"
+
+
 @dataclass
 class _Step:
     direction: str
     issued_at: float
-    baseline: Optional[float]
-    frontal_seen: bool = False
-    consec: int = 0
-    wrong_way: bool = False
-    # Same counters under the "camera image is mirrored" hypothesis (see
-    # ChallengeManager._mirror). Some laptop webcams / drivers deliver a
-    # mirrored image, which makes every correct turn look like the wrong way.
-    consec_m: int = 0
-    wrong_way_m: bool = False
+    armed_at: Optional[float] = None
+    arm_count: int = 0
+    consec: dict = field(default_factory=lambda: {False: 0, True: 0})
+    first_hit: dict = field(default_factory=lambda: {False: None, True: None})
+    wrong: dict = field(default_factory=lambda: {False: 0, True: 0})
     face_frames: int = 0
+    frames: int = 0
     rel_min: float = 0.0
     rel_max: float = 0.0
-    frames: int = 0
 
 
 @dataclass
@@ -155,75 +164,149 @@ class ChallengeManager:
     rng: random.Random = field(default_factory=random.Random)
 
     # public state
-    status: str = 'idle'            # idle | active | passed | failed
+    status: str = 'idle'            # idle | active | passed | failed | skipped
     passes: int = 0
-    failures: int = 0               # confirmed (after retry) failures
+    failures: int = 0               # checks reported failed (MAX_WRONG wrong attempts)
+    skips: int = 0
     last_fail_reason: str = ''
 
+    # Live demo only: automatic checks
+    auto: bool = False
+    first_delay: Optional[float] = None
+    interval: Optional[tuple] = None
+    # Live demo only: a step with no correct turn within this many seconds counts
+    # as a wrong attempt (so a still replay visibly fails). None = no time limit.
+    step_timeout: Optional[float] = None
+
     # internal
-    _first_face_at: Optional[float] = None
-    _next_at: Optional[float] = None
+    _pending: Optional[str] = None          # origin of a requested check not yet issued
+    _origin: str = ''
+    _challenge_id: str = ''
     _seq: List[str] = field(default_factory=list)
     _step_idx: int = 0
     _step: Optional[_Step] = None
-    _challenge_id: str = ''
-    _attempt: int = 0
-    _yaw_hist: List[tuple] = field(default_factory=list)   # (t, yaw) last few seconds
-    _base: Optional[float] = None                           # front-facing yaw at challenge start
-    # Camera orientation: None = unknown yet, False = normal, True = mirrored.
-    # Learned from the first challenge where EVERY step follows the instructions
-    # consistently in one orientation; a replayed clip can't do that for a
-    # random LEFT/RIGHT sequence, so this does not weaken the check.
-    _mirror: Optional[bool] = None
-    _hyps: tuple = (False, True)                            # orientations still consistent this challenge
+    _hyps: tuple = (False, True)
+    _mirror: Optional[bool] = None          # camera orientation, learned on the first pass
+    _base: Optional[float] = None           # candidate's normal (front) yaw for this check
+    _wrong_attempts: int = 0
+    _fail_reported: bool = False
+    _started_at: float = 0.0
+    _reactions: List[float] = field(default_factory=list)
+    _yaw_recent: List[tuple] = field(default_factory=list)
+    _yaw_long: List[tuple] = field(default_factory=list)
+    _first_frame_at: Optional[float] = None
+    _next_auto_at: Optional[float] = None
 
     @property
     def enabled(self) -> bool:
         return ENABLED and self.yaw_fn is not None
 
-    # -- scheduling ------------------------------------------------------------
-    # Per-session timing overrides (the live demo uses short intervals)
-    first_delay: Optional[float] = None
-    interval: Optional[tuple] = None
+    @property
+    def active(self) -> bool:
+        return self._step is not None
 
-    def request_now(self, now: Optional[float] = None):
-        """Ask for a challenge as soon as possible (e.g. interviewer button)."""
+    @property
+    def busy(self) -> bool:
+        return self._step is not None or self._pending is not None
+
+    # -- requests ------------------------------------------------------------
+    def request_now(self, now: Optional[float] = None, origin: str = 'interviewer') -> str:
+        """Ask for a check. Returns 'started', 'busy' or 'unavailable'."""
+        if not self.enabled:
+            return 'unavailable'
+        if self.busy:
+            return 'busy'
+        self._pending = origin
+        return 'started'
+
+    def skip(self, now: Optional[float] = None) -> List[dict]:
+        """The candidate closed the check."""
         now = time.time() if now is None else now
-        if self._step is None:
-            self._next_at = now
+        if not self.busy:
+            return []
+        origin = self._origin if self._step is not None else (self._pending or '')
+        cid = self._challenge_id or str(uuid.uuid4())[:8]
+        print(f"[Liveness] {self.session_id} SKIPPED by candidate (origin={origin}, wrong={self._wrong_attempts})", flush=True)
+        self._step = None
+        self._pending = None
+        self.status = 'skipped'
+        self.skips += 1
+        self._schedule_auto(now)
+        return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': cid,
+                 'passed': False, 'skipped': True, 'final': True, 'origin': origin,
+                 'wrong_attempts': self._wrong_attempts,
+                 'waited_s': round(now - self._started_at, 1) if self._started_at else 0.0,
+                 'message': 'Liveness check closed. Your interviewer has been notified.'}]
 
-    def _schedule_next(self, now: float, delay: Optional[float] = None):
+    def cancel(self, now: Optional[float] = None) -> List[dict]:
+        """Kept for compatibility: checks no longer time out, so nothing to cancel."""
+        return []
+
+    def _schedule_auto(self, now: float, delay: Optional[float] = None):
+        if not self.auto:
+            return
         lo, hi = self.interval if self.interval else (INTERVAL_MIN, INTERVAL_MAX)
-        self._next_at = now + (delay if delay is not None else self.rng.uniform(lo, hi))
+        self._next_auto_at = now + (delay if delay is not None else self.rng.uniform(lo, hi))
 
-    def _baseline(self, now: float) -> Optional[float]:
-        recent = [y for t, y in self._yaw_hist if now - t <= 1.5]
+    def _pose_base(self, now: float) -> Optional[float]:
+        long_ = [y for t, y in self._yaw_long if now - t <= POSE_WINDOW]
+        if len(long_) >= 15:
+            return float(np.median(long_))
+        recent = [y for t, y in self._yaw_recent if now - t <= 1.5]
         return float(np.median(recent)) if len(recent) >= 3 else None
 
-    def _is_still(self, now: float) -> bool:
-        recent = [y for t, y in self._yaw_hist if now - t <= 1.5]
-        return len(recent) >= 5 and float(np.std(recent)) <= STILL_STD
+    # -- per frame -----------------------------------------------------------
+    def on_frame(self, frame_bgr, now: Optional[float] = None) -> List[dict]:
+        """Feed every received frame (not while the candidate's tab is hidden)."""
+        if not self.enabled:
+            return []
+        now = time.time() if now is None else now
+        yaw = self.yaw_fn(frame_bgr)
+        if self._first_frame_at is None:
+            self._first_frame_at = now
+            self._schedule_auto(now, self.first_delay if self.first_delay is not None else FIRST_DELAY)
+        if yaw is not None:
+            self._yaw_recent.append((now, yaw))
+            if self._step is None:
+                self._yaw_long.append((now, yaw))
+        self._yaw_recent = [(t, y) for t, y in self._yaw_recent if now - t <= 4.0]
+        self._yaw_long = [(t, y) for t, y in self._yaw_long if now - t <= POSE_WINDOW]
 
-    def _start(self, now: float, retry: bool) -> List[dict]:
-        self._attempt = self._attempt + 1 if retry else 1
+        if self._step is None:
+            if (self.auto and self._pending is None and self._next_auto_at is not None
+                    and now >= self._next_auto_at):
+                self._pending = 'auto'
+            if self._pending is not None:
+                return self._begin(now)
+            return []
+        return self._advance(now, yaw)
+
+    def _begin(self, now: float) -> List[dict]:
+        self._origin = self._pending or ''
+        self._pending = None
         self._challenge_id = str(uuid.uuid4())[:8]
-        # Random 3-turn sequence, never all the same direction
+        self._wrong_attempts = 0
+        self._fail_reported = False
+        self._started_at = now
+        self._reactions = []
+        self._base = self._pose_base(now)
+        self.status = 'active'
+        self._new_sequence()
+        print(f"[Liveness] {self.session_id} START origin={self._origin} seq={self._seq} base={self._base} mirror={self._mirror}", flush=True)
+        return self._issue_step(now)
+
+    def _new_sequence(self):
+        n = N_STEPS_UNKNOWN if self._mirror is None else N_STEPS_KNOWN
         while True:
-            self._seq = [self.rng.choice(['LEFT', 'RIGHT']) for _ in range(N_STEPS)]
+            self._seq = [self.rng.choice(['LEFT', 'RIGHT']) for _ in range(n)]
             if len(set(self._seq)) > 1:
                 break
         self._step_idx = 0
-        self._base = self._baseline(now)
         self._hyps = (False, True) if self._mirror is None else (self._mirror,)
-        self.status = 'active'
-        return self._issue_step(now)
 
-    def _issue_step(self, now: float) -> List[dict]:
+    def _issue_step(self, now: float, note: Optional[str] = None) -> List[dict]:
         d = self._seq[self._step_idx]
-        # Every step is measured from the front-facing pose at challenge start,
-        # so coming back to centre after step 1 can't count as a turn in step 2.
-        self._step = _Step(direction=d, issued_at=now, baseline=self._base)
-        print(f"[Liveness] {self.session_id} issue step {self._step_idx + 1}/{len(self._seq)} {d} attempt={self._attempt} base={self._base}", flush=True)
+        self._step = _Step(direction=d, issued_at=now)
         return [{
             'type': 'LIVENESS_CHALLENGE',
             'challenge_id': self._challenge_id,
@@ -231,99 +314,98 @@ class ChallengeManager:
             'of': len(self._seq),
             'direction': d,
             'instruction': INSTRUCTIONS[d],
-            'timeout_ms': int(STEP_TIMEOUT * 1000),
-            'retry': self._attempt > 1,
+            'timeout_ms': 0,                      # no time limit
+            'retry': self._wrong_attempts > 0,
+            'note': note,
+            'origin': self._origin,
+            'wrong_attempts': self._wrong_attempts,
+            'max_wrong': MAX_WRONG,
+            'failed_reported': self._fail_reported,
         }]
 
-    # -- per frame ---------------------------------------------------------------
-    def on_frame(self, frame_bgr, now: Optional[float] = None) -> List[dict]:
-        """Feed every received frame. Returns messages for the candidate."""
-        if not self.enabled:
-            return []
-        now = time.time() if now is None else now
-        yaw = self.yaw_fn(frame_bgr)
-        if self._first_face_at is None:
-            # Schedule from the first FRAME, not the first detected face — a feed
-            # that never shows a usable face must not escape challenges.
-            self._first_face_at = now
-            self._schedule_next(now, self.first_delay if self.first_delay is not None else FIRST_DELAY)
-        if yaw is not None:
-            self._yaw_hist.append((now, yaw))
-        self._yaw_hist = [(t, y) for t, y in self._yaw_hist if now - t <= 4.0]
-
-        out: List[dict] = []
-        if self._step is None:
-            if self._next_at is not None and now >= self._next_at:
-                waited = now - self._next_at
-                if self._baseline(now) is None and waited < NO_FACE_WAIT:
-                    pass  # no face right now — give the candidate a moment to come back
-                elif self._baseline(now) is not None and not self._is_still(now) and waited < STILL_WAIT:
-                    pass  # wait for a still moment so earlier motion can't count
-                else:
-                    out += self._start(now, retry=self.status == 'retry_pending')
-            return out
-
+    def _advance(self, now: float, yaw: Optional[float]) -> List[dict]:
         st = self._step
-        elapsed = now - st.issued_at
         st.frames += 1
+        out: List[dict] = []
+        if self.step_timeout is not None and now - st.issued_at >= self.step_timeout:
+            return self._wrong_attempt(now, f'no head turn to the {st.direction} within {self.step_timeout:.0f}s')
+        rel = None
         if yaw is not None:
             st.face_frames += 1
-            if st.baseline is None:
-                st.baseline = yaw
-            rel = yaw - st.baseline
-            st.rel_min = min(st.rel_min, rel)
-            st.rel_max = max(st.rel_max, rel)
-            sign = 1.0 if st.direction == 'LEFT' else -1.0
-            # Must pass through front-facing first. Step 1: within 1.5 s of the
-            # instruction (a clip that is already turned can't pass). Later steps
-            # start from the previous turn, so any time before the turn counts.
-            first_step = self._step_idx == 0
-            if abs(rel) <= FRONTAL_MAX and (elapsed <= 2.5 or not first_step):
-                st.frontal_seen = True
-            in_window = MIN_LATENCY <= elapsed <= MAX_LATENCY + 0.3
-            for mirrored in self._hyps:
-                sg = -sign if mirrored else sign
-                c_attr, w_attr = ('consec_m', 'wrong_way_m') if mirrored else ('consec', 'wrong_way')
-                if st.frontal_seen and -sg * rel >= WRONG_WAY and getattr(st, c_attr) == 0:
-                    setattr(st, w_attr, True)
-                if st.frontal_seen and sg * rel >= THRESH and in_window:
-                    setattr(st, c_attr, getattr(st, c_attr) + 1)
-                else:
-                    setattr(st, c_attr, 0)
-                if getattr(st, c_attr) >= CONSEC and st.frontal_seen and not getattr(st, w_attr):
-                    # This orientation explains the step; drop the other one so the
-                    # remaining steps must follow the SAME orientation.
-                    self._hyps = (mirrored,)
-                    return self._step_passed(now)
+            if self._base is None:
+                self._base = self._pose_base(now)
+            if self._base is not None:
+                rel = yaw - self._base
+                st.rel_min = min(st.rel_min, rel)
+                st.rel_max = max(st.rel_max, rel)
+        else:
+            st.arm_count = 0
+            for m in (False, True):
+                st.consec[m] = 0
+                st.wrong[m] = 0
 
-        # Live feedback for the candidate (and for debugging): ~3 times a second,
-        # how far the head has turned towards the target (1.0 = enough), and
-        # whether the face is visible at all.
-        if st.frames % 3 == 0:
-            if yaw is not None:
-                sgn = 1.0 if st.direction == 'LEFT' else -1.0
-                prog = max(max(0.0, (-sgn if m else sgn) * (yaw - st.baseline)) for m in self._hyps) / THRESH
+        if rel is not None:
+            if st.armed_at is None:
+                st.arm_count = st.arm_count + 1 if abs(rel) <= FRONTAL_MAX else 0
+                if st.arm_count >= ARM_FRAMES:
+                    st.armed_at = now
             else:
-                prog = 0.0
+                sign = 1.0 if st.direction == 'LEFT' else -1.0
+                since = now - st.armed_at
+                for m in self._hyps:
+                    sg = -sign if m else sign
+                    if sg * rel >= THRESH and since >= MIN_LATENCY:
+                        if st.consec[m] == 0:
+                            st.first_hit[m] = now
+                        st.consec[m] += 1
+                    else:
+                        st.consec[m] = 0
+                    st.wrong[m] = st.wrong[m] + 1 if -sg * rel >= WRONG_WAY else 0
+                    if st.consec[m] >= CONSEC:
+                        # This orientation explains the step; later steps must match it.
+                        self._hyps = (m,)
+                        self._reactions.append(max(0.0, (st.first_hit[m] or now) - st.armed_at))
+                        return self._step_passed(now)
+                if all(st.wrong[m] >= WRONG_CONSEC for m in self._hyps):
+                    return self._wrong_attempt(now)
+
+        if st.frames % 3 == 0:
+            prog = 0.0
+            wrong_pose = False
+            if rel is not None and st.armed_at is not None:
+                sign = 1.0 if st.direction == 'LEFT' else -1.0
+                prog = max(max(0.0, (-sign if m else sign) * rel) for m in self._hyps) / THRESH
+                wrong_pose = all(st.wrong[m] > 0 for m in self._hyps)
             out.append({'type': 'LIVENESS_PROGRESS', 'challenge_id': self._challenge_id,
                         'step': self._step_idx + 1, 'face': yaw is not None,
-                        'progress': round(min(prog, 1.5), 2), 'wrong_way': all(st.wrong_way_m if m else st.wrong_way for m in self._hyps)})
-
-        if elapsed >= STEP_TIMEOUT or (elapsed > MAX_LATENCY + 0.3 and st.consec == 0 and st.consec_m == 0):
-            if st.face_frames == 0:
-                reason = 'no face visible during the challenge'
-            elif not st.frontal_seen:
-                reason = 'face was not facing the camera when the challenge started'
-            elif all(st.wrong_way_m if m else st.wrong_way for m in self._hyps):
-                reason = f'head turned the wrong way (asked {st.direction})'
-            else:
-                reason = f'no head turn to the {st.direction} within {MAX_LATENCY:.1f}s'
-            return self._step_failed(now, reason)
+                        'armed': st.armed_at is not None,
+                        'progress': round(min(prog, 1.5), 2), 'wrong_way': wrong_pose,
+                        'wrong_attempts': self._wrong_attempts})
         return out
+
+    def _wrong_attempt(self, now: float, reason: Optional[str] = None) -> List[dict]:
+        st = self._step
+        self._wrong_attempts += 1
+        reason = reason or f'head turned the wrong way (asked {st.direction})'
+        self.last_fail_reason = reason
+        print(f"[Liveness] {self.session_id} WRONG attempt {self._wrong_attempts} {st.direction} rel[min={st.rel_min:+.3f} max={st.rel_max:+.3f}] base={self._base}", flush=True)
+        out: List[dict] = []
+        if self._wrong_attempts >= MAX_WRONG and not self._fail_reported:
+            self._fail_reported = True
+            self.failures += 1
+            self.status = 'failed'
+            out.append({'type': 'LIVENESS_CHECK_FAILED', 'challenge_id': self._challenge_id,
+                        'origin': self._origin, 'wrong_attempts': self._wrong_attempts,
+                        'reason': reason,
+                        'message': "That didn't match the instructions. Your interviewer has been "
+                                   "notified - you can keep trying or close this check."})
+        # Start over with a fresh random sequence (the candidate must come back to front first)
+        self._new_sequence()
+        return out + self._issue_step(now, note='wrong_way')
 
     def _step_passed(self, now: float) -> List[dict]:
         st = self._step
-        print(f"[Liveness] {self.session_id} PASS step {self._step_idx + 1} {st.direction} rel[min={st.rel_min:+.3f} max={st.rel_max:+.3f}] t={now - st.issued_at:.1f}s", flush=True)
+        print(f"[Liveness] {self.session_id} PASS step {self._step_idx + 1} {st.direction} hyps={self._hyps} reaction={self._reactions[-1]:.2f}s", flush=True)
         self._step_idx += 1
         if self._step_idx < len(self._seq):
             return self._issue_step(now)
@@ -333,47 +415,14 @@ class ChallengeManager:
         if self._mirror is None and len(self._hyps) == 1:
             self._mirror = self._hyps[0]
             print(f"[Liveness] {self.session_id} camera orientation learned: {'MIRRORED' if self._mirror else 'normal'}", flush=True)
-        self._schedule_next(now)
+        self._schedule_auto(now)
+        avg = round(float(np.mean(self._reactions)), 2) if self._reactions else None
         return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
-                 'passed': True, 'message': 'Thanks — liveness check passed.'}]
-
-    def _step_failed(self, now: float, reason: str) -> List[dict]:
-        st = self._step
-        if st is not None:
-            print(f"[Liveness] {self.session_id} FAIL step {self._step_idx + 1} {st.direction}: {reason} | rel[min={st.rel_min:+.3f} max={st.rel_max:+.3f}] need {'+' if st.direction == 'LEFT' else '-'}{THRESH} frames={st.frames} face={st.face_frames} frontal={st.frontal_seen} wrong_way={st.wrong_way} base={st.baseline} attempt={self._attempt}", flush=True)
-        self._step = None
-        if self._attempt < 2:
-            self.status = 'retry_pending'
-            self._schedule_next(now, RETRY_DELAY)
-            return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
-                     'passed': False, 'final': False,
-                     'message': "We couldn't confirm that — let's try once more."}]
-        self.status = 'failed'
-        self.failures += 1
-        self.last_fail_reason = reason
-        self._schedule_next(now, self.rng.uniform(45, 75))  # re-check sooner after a failure
-        return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
-                 'passed': False, 'final': True, 'reason': reason,
-                 'message': 'Liveness check could not be completed. Your interviewer has been notified.'}]
-
-    def cancel(self, now: Optional[float] = None) -> List[dict]:
-        """Abort a running challenge without counting it as a failure (e.g. the
-        candidate's tab went to the background, so they can't see the prompt and
-        the browser stops updating the camera image). Re-issued soon after."""
-        now = time.time() if now is None else now
-        if self._step is None:
-            return []
-        print(f"[Liveness] {self.session_id} CANCELLED step {self._step_idx + 1} (candidate tab hidden)", flush=True)
-        self._step = None
-        self.status = 'idle'
-        self._schedule_next(now, 8.0)
-        return [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
-                 'passed': False, 'final': False, 'cancelled': True,
-                 'message': 'Liveness check paused - keep this tab open. It will restart shortly.'}]
-
-    @property
-    def active(self) -> bool:
-        return self._step is not None
+                 'passed': True, 'final': True, 'origin': self._origin,
+                 'reaction_s': avg, 'wrong_attempts': self._wrong_attempts,
+                 'after_fail': self._fail_reported,
+                 'total_s': round(now - self._started_at, 1),
+                 'message': 'Thanks - liveness check passed.'}]
 
     def close(self):
         if hasattr(self.yaw_fn, 'close'):

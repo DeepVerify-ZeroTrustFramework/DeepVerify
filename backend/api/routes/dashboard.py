@@ -70,8 +70,10 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
 
     # Send historical alerts
     alerts_col = get_alerts_collection()
+    # Alerts the interviewer cleared from the feed stay in the database (for the
+    # report and scoring) but are not re-sent to the live feed.
     alert_cursor = alerts_col.find(
-        {"session_id": session_id},
+        {"session_id": session_id, "cleared_from_feed": {"$ne": True}},
         {"_id": 0}
     ).sort("timestamp", -1).limit(50)
 
@@ -93,6 +95,11 @@ async def websocket_dashboard(websocket: WebSocket, session_id: str):
             "type": "EXISTING_ALERTS",
             "alerts": list(reversed(existing_alerts)),
         })
+
+    cleared_count = await alerts_col.count_documents(
+        {"session_id": session_id, "cleared_from_feed": True})
+    if cleared_count:
+        await live_bus.safe_send(websocket, {"type": "ALERTS_CLEARED_COUNT", "count": cleared_count})
 
     # Send current code editor state if candidate has already typed code
     curr_code = get_session_code(session_id)
@@ -211,6 +218,45 @@ async def _listen_websocket(websocket: WebSocket, session_id: str):
                     "type": "COMMAND_ACK",
                     "command": "END_SESSION",
                     "message": "Session ended",
+                })
+
+            elif command == 'RUN_LIVENESS':
+                # Interviewer button: open a liveness check on the candidate's screen now.
+                from api.routes.frames import request_liveness_from_interviewer
+                res = await request_liveness_from_interviewer(session_id)
+                msgs = {
+                    'started': 'Liveness check sent to the candidate',
+                    'busy': 'A liveness check is already open on the candidate\'s screen',
+                    'unavailable': 'Liveness checks are unavailable on this server (face tracking not loaded)',
+                    'no_candidate': 'The candidate\'s camera stream is not connected yet',
+                }
+                await live_bus.safe_send(websocket, {
+                    "type": "COMMAND_ACK",
+                    "command": "RUN_LIVENESS",
+                    "result": res,
+                    "message": msgs.get(res, res),
+                })
+
+            elif command == 'CLEAR_ALERTS':
+                # Visual-only: hide these alerts from the interviewer's live feed.
+                # Does NOT acknowledge/excuse them and does NOT touch the trust
+                # score; they remain in the database and in the session report.
+                ids = [str(i) for i in (data.get('alert_ids') or []) if i][:2000]
+                cleared = 0
+                if ids:
+                    from datetime import datetime
+                    res = await get_alerts_collection().update_many(
+                        {"session_id": session_id,
+                         "$or": [{"alertId": {"$in": ids}}, {"alert_id": {"$in": ids}}]},
+                        {"$set": {"cleared_from_feed": True,
+                                  "cleared_at": datetime.utcnow().isoformat()}},
+                    )
+                    cleared = res.modified_count
+                await live_bus.safe_send(websocket, {
+                    "type": "COMMAND_ACK",
+                    "command": "CLEAR_ALERTS",
+                    "cleared": cleared,
+                    "message": "Anomaly feed cleared (scores unchanged)",
                 })
 
             elif command in ('ACK_ALERT', 'ACKNOWLEDGE_ALERT'):

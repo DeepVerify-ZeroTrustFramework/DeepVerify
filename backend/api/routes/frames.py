@@ -102,7 +102,8 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: st
                         'first_done': False, 'flag': False},
         }
         a = _session_analyzers[session_id]
-        # Active liveness: random server-verified head-turn challenges
+        # Active liveness: server-verified head-turn checks, run at the start of
+        # the interview and whenever the interviewer asks (no time limit).
         a['liveness'] = ChallengeManager(
             session_id, yaw_fn=(lambda _f, a=a: a.get('_last_yaw')) if a['face_mesh'] is not None else None)
     return _session_analyzers[session_id]
@@ -145,7 +146,9 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
 
     analyzers = get_or_create_analyzers(session_id, merged_thresholds, source=source, strict_prnu=live_demo)
     if live_demo and analyzers.get('liveness') is not None:
-        # Demo pacing: first check after ~10 s, then every 30-45 s
+        # Demo pacing: automatic checks, first after ~10 s, then every 30-45 s
+        analyzers['liveness'].auto = True
+        analyzers['liveness'].step_timeout = 10.0
         analyzers['liveness'].first_delay = 10.0
         analyzers['liveness'].interval = (30.0, 45.0)
     K_hat = None  # PRNU v2 reference lives in analyzers['prnu']
@@ -189,10 +192,18 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                 # Text message: JSON behavioral event or gaze data
                 try:
                     msg = json.loads(data['text'])
-                    if msg.get('type') == 'LIVENESS_REQUEST':
-                        # Live demo button: run a head-turn check now
-                        if analyzers.get('liveness') is not None:
-                            analyzers['liveness'].request_now()
+                    if msg.get('type') in ('LIVENESS_REQUEST', 'LIVENESS_START'):
+                        # LIVENESS_START: candidate page, once identity check + full
+                        # screen are done. LIVENESS_REQUEST: live-demo button.
+                        origin = 'start' if msg.get('type') == 'LIVENESS_START' else 'demo'
+                        res = await _start_liveness(session_id, analyzers, origin)
+                        if res == 'unavailable':
+                            await websocket.send_json({'type': 'LIVENESS_UNAVAILABLE'})
+                        continue
+                    if msg.get('type') == 'LIVENESS_SKIP':
+                        lm = analyzers.get('liveness')
+                        if lm is not None:
+                            await _emit_liveness(session_id, websocket, lm.skip(), analyzers, merged_thresholds)
                         continue
                     if msg.get('type') == 'SOURCE_KIND':
                         # Live demo: informational only. Files get head-turn checks too
@@ -315,32 +326,14 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
                 time.time() - analyzers.get('tab_visible_since', 0.0) < 2.0)
     if websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
         lm_ = analyzers['liveness']
-        if tab_away:
-            for m in lm_.cancel() if lm_.active else []:
-                try:
-                    await websocket.send_json(m)
-                except Exception:
-                    pass
-            liveness_msgs = []
-        else:
+        # A hidden tab pauses the check (no time limit, so nothing is lost).
+        if not tab_away:
             try:
                 liveness_msgs = lm_.on_frame(frame)
             except Exception as e:
                 print(f"[Liveness] Error: {e}")
                 liveness_msgs = []
-        for m in liveness_msgs:
-            # The challenge asks for head turns: keep the gaze module from flagging them.
-            try:
-                from api.routes.ws_handlers import _get_telemetry
-                quiet = 10.0 if m.get('type') == 'LIVENESS_CHALLENGE' else 4.0
-                _get_telemetry(session_id)['_liveness_quiet_until'] = time.time() + quiet
-            except Exception:
-                pass
-            try:
-                await websocket.send_json(m)
-            except Exception:
-                pass
-            await _handle_liveness_event(session_id, m, analyzers, thresholds)
+            await _emit_liveness(session_id, websocket, liveness_msgs, analyzers, thresholds)
 
     # --- Jitter: the camera's own frame timing (FRAME_TIMING messages) ---
     # Server arrival times only reflect the browser's send timer and our own
@@ -455,7 +448,7 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_FINGERPRINT_CHANGE', 'MEDIUM', 'PRNU',
             f'Live video no longer matches the camera fingerprint of {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
-            f'— running a liveness check', float(decision['pce'])))
+            f'— consider running a liveness check', float(decision['pce'])))
         _request_liveness(analyzers)
     elif streak == 60:
         await _publish_once(session_id, analyzers, _make_alert(
@@ -684,10 +677,8 @@ def _rppg_good_frac(analyzers: dict):
 
 
 def _request_liveness(analyzers: dict):
-    """A passive check flagged something: challenge the candidate now instead of waiting."""
-    lm = analyzers.get('liveness')
-    if lm is not None and getattr(lm, 'enabled', False):
-        lm.request_now()
+    """A passive check flagged something. Liveness checks are now started by the
+    interviewer (the alert text suggests it); just queue an AI face check."""
     _request_ai_face_check(analyzers, 'anomaly')
 
 
@@ -743,22 +734,100 @@ async def _run_ai_face_check(session_id: str, jpeg: bytes, analyzers: dict):
         print(f"[AIFace] Could not publish alert: {e}")
 
 
+async def _start_liveness(session_id: str, analyzers: dict, origin: str) -> str:
+    """Queue a liveness check; it is issued on the candidate's next frame."""
+    lm = analyzers.get('liveness')
+    if lm is None or not getattr(lm, 'enabled', False):
+        return 'unavailable'
+    res = lm.request_now(origin=origin)
+    if res == 'started':
+        await _publish_liveness_status(session_id, {'state': 'requested', 'origin': origin})
+    return res
+
+
+async def request_liveness_from_interviewer(session_id: str) -> str:
+    """Interviewer's "Run liveness check" button.
+    Returns 'started', 'busy', 'unavailable' or 'no_candidate'."""
+    analyzers = _session_analyzers.get(session_id)
+    if analyzers is None:
+        return 'no_candidate'
+    return await _start_liveness(session_id, analyzers, 'interviewer')
+
+
+async def _publish_liveness_status(session_id: str, data: dict):
+    """Live liveness state for the interviewer dashboard (not an alert)."""
+    try:
+        await publish_trust_score(session_id, {'type': 'LIVENESS_STATUS',
+                                               'timestamp': datetime.utcnow().isoformat(), **data})
+    except Exception as e:
+        print(f"[Liveness] Could not publish status: {e}")
+
+
+async def _emit_liveness(session_id: str, websocket, msgs: list, analyzers: dict, thresholds: dict):
+    """Send liveness messages to the candidate and turn results into alerts."""
+    for m in msgs:
+        # The check asks for head turns: keep the gaze module from flagging them.
+        try:
+            from api.routes.ws_handlers import _get_telemetry
+            _get_telemetry(session_id)['_liveness_quiet_until'] = time.time() + 6.0
+        except Exception:
+            pass
+        try:
+            await websocket.send_json(m)
+        except Exception:
+            pass
+        try:
+            await _handle_liveness_event(session_id, m, analyzers, thresholds)
+        except Exception as e:
+            print(f"[Liveness] Event handling error: {e}")
+
+
+_ORIGIN_TEXT = {'start': 'start-of-interview', 'interviewer': 'interviewer-requested',
+                'demo': 'demo', 'auto': 'automatic'}
+
+
 async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, thresholds: dict):
-    """Turn a challenge result into a dashboard alert + trust-score effect."""
-    if msg.get('type') != 'LIVENESS_CHALLENGE_RESULT':
+    """Turn liveness events into dashboard alerts, status and the trust-score flag.
+
+    Never stops or blocks the interview: the interviewer is informed and decides.
+    """
+    t = msg.get('type')
+    if t == 'LIVENESS_PROGRESS':
         return
     lm = analyzers['liveness']
-    if msg.get('passed'):
-        alert_type, severity = 'LIVENESS_PASS', 'LOW'
-        text = f'Active liveness check passed (random head turns verified) — {lm.passes} passed so far'
-        failed = False
-    elif msg.get('final'):
-        alert_type, severity = 'LIVENESS_FAIL', 'CRITICAL'
-        text = (f"Active liveness check FAILED twice: {msg.get('reason', 'no response')}. "
-                f"Possible pre-recorded, AI-generated or injected video.")
-        failed = True
+    if t == 'LIVENESS_CHALLENGE':
+        if msg.get('step') == 1:
+            await _publish_liveness_status(session_id, {
+                'state': 'active', 'origin': msg.get('origin'),
+                'wrong_attempts': msg.get('wrong_attempts', 0),
+                'challenge_id': msg.get('challenge_id')})
+        return
+
+    kind = _ORIGIN_TEXT.get(msg.get('origin') or '', '')
+    if t == 'LIVENESS_CHECK_FAILED':
+        alert_type, severity, failed, state = 'LIVENESS_FAIL', 'CRITICAL', True, 'failed'
+        text = (f"Liveness check ({kind}) FAILED: {msg.get('wrong_attempts')} wrong-direction attempts "
+                f"- last one: {msg.get('reason', '')}. Possible pre-recorded, AI-generated or injected video. "
+                f"The check is still open - the candidate may keep trying or close it.")
+    elif t == 'LIVENESS_CHALLENGE_RESULT' and msg.get('skipped'):
+        alert_type, severity, failed, state = 'LIVENESS_SKIPPED', 'HIGH', True, 'skipped'
+        text = (f"Candidate closed the {kind} liveness check without completing it"
+                f"{' after ' + str(msg.get('wrong_attempts')) + ' wrong attempts' if msg.get('wrong_attempts') else ''}. "
+                f"You can run another check from the dashboard.")
+    elif t == 'LIVENESS_CHALLENGE_RESULT' and msg.get('passed'):
+        failed, state = False, 'passed'
+        wrong = int(msg.get('wrong_attempts') or 0)
+        react = msg.get('reaction_s')
+        timing = f"average reaction {react:.1f}s" if isinstance(react, (int, float)) else ''
+        if wrong:
+            alert_type, severity = 'LIVENESS_PASS', 'MEDIUM'
+            text = (f"Liveness check ({kind}) passed after {wrong} wrong-direction attempt"
+                    f"{'s' if wrong != 1 else ''} ({timing}, {msg.get('total_s')}s total).")
+        else:
+            alert_type, severity = 'LIVENESS_PASS', 'LOW'
+            text = f"Liveness check ({kind}) passed - random head turns verified ({timing})."
     else:
-        return  # first miss — candidate gets one retry before anything is flagged
+        return
 
     analyzers['liveness_failed'] = failed
     if failed:
@@ -769,12 +838,18 @@ async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, th
     except Exception:
         pass
 
+    await _publish_liveness_status(session_id, {
+        'state': state, 'origin': msg.get('origin'),
+        'wrong_attempts': msg.get('wrong_attempts', 0),
+        'reaction_s': msg.get('reaction_s'), 'challenge_id': msg.get('challenge_id'),
+        'passes': lm.passes, 'failures': lm.failures, 'skips': lm.skips})
+
     aid = str(uuid.uuid4())
     alert = {
         'type': 'ALERT', 'alert_id': aid, 'alertId': aid,
         'alert_type': alert_type, 'alertType': alert_type,
         'module': 'LIVENESS', 'severity': severity,
-        'value': float(lm.passes if not failed else lm.failures),
+        'value': float(msg.get('wrong_attempts') or 0),
         'timestamp': datetime.utcnow().isoformat(), 'acknowledged': False,
         'message': text, 'description': text,
     }

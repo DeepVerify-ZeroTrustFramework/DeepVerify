@@ -5,7 +5,7 @@ import {
   Monitor, Users, Smartphone, Maximize2, Minimize2, Camera,
   CheckCircle2, XCircle, RefreshCw, UploadCloud, Lock, LogOut, Home,
   Mic, MicOff, Video, VideoOff, Eye, EyeOff, Play, Terminal, Check,
-  ArrowLeft, ArrowRight
+  ArrowLeft, ArrowRight, X
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { useWebRTC } from '../hooks/useWebRTC'
@@ -129,11 +129,16 @@ export default function CandidateSession() {
   const frameIntervalRef = useRef<any>(null)
 
   // ── Active liveness challenge (issued + verified by the server on the frames socket) ──
-  const [livenessProgress, setLivenessProgress] = useState<null | { face: boolean; progress: number; wrongWay: boolean }>(null)
+  // No time limit: the check stays open until it passes or the candidate closes it.
+  // It never blocks the interview - the panel floats above it.
+  const [livenessProgress, setLivenessProgress] = useState<null | { face: boolean; armed: boolean; progress: number; wrongWay: boolean }>(null)
   const [livenessChallenge, setLivenessChallenge] = useState<null | {
     id: string; step: number; of: number; direction: 'LEFT' | 'RIGHT'
-    instruction: string; timeoutMs: number; retry: boolean; key: number
+    instruction: string; note: string | null; origin: string; key: number
   }>(null)
+  const [livenessFailNotice, setLivenessFailNotice] = useState<string | null>(null)
+  const [framesReady, setFramesReady] = useState(false)
+  const startLivenessSentRef = useRef(false)
   const [livenessResult, setLivenessResult] = useState<null | { passed: boolean; message: string }>(null)
   const livenessResultTimerRef = useRef<any>(null)
 
@@ -303,24 +308,33 @@ export default function CandidateSession() {
       try { msg = JSON.parse(event.data) } catch { return }
       if (msg.type === 'LIVENESS_CHALLENGE') {
         setLivenessResult(null)
+        if (msg.step === 1 && !msg.retry) setLivenessFailNotice(null)
+        setLivenessProgress(null)
         setLivenessChallenge({
           id: msg.challenge_id, step: msg.step, of: msg.of,
           direction: msg.direction === 'RIGHT' ? 'RIGHT' : 'LEFT',
-          instruction: msg.instruction, timeoutMs: msg.timeout_ms || 6000,
-          retry: !!msg.retry, key: Date.now(),
+          instruction: msg.instruction, note: msg.note || null,
+          origin: msg.origin || '', key: Date.now(),
         })
         // Spoken prompt too, in case the candidate is looking at the code editor
         try {
           if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel()
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(msg.instruction))
+            const text = msg.note === 'wrong_way'
+              ? `That was the other way. Let's try again. ${msg.instruction}`
+              : msg.instruction
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
           }
         } catch { /* speech is optional */ }
       } else if (msg.type === 'LIVENESS_PROGRESS') {
-        setLivenessProgress({ face: !!msg.face, progress: Number(msg.progress) || 0, wrongWay: !!msg.wrong_way })
+        setLivenessProgress({ face: !!msg.face, armed: !!msg.armed, progress: Number(msg.progress) || 0, wrongWay: !!msg.wrong_way })
+      } else if (msg.type === 'LIVENESS_CHECK_FAILED') {
+        // Interviewer has been told; the check stays open and the interview goes on.
+        setLivenessFailNotice(msg.message || 'Your interviewer has been notified. You can keep trying or close this check.')
       } else if (msg.type === 'LIVENESS_CHALLENGE_RESULT') {
         setLivenessProgress(null)
         setLivenessChallenge(null)
+        setLivenessFailNotice(null)
         setLivenessResult({ passed: !!msg.passed, message: msg.message || '' })
         if (livenessResultTimerRef.current) clearTimeout(livenessResultTimerRef.current)
         livenessResultTimerRef.current = setTimeout(() => setLivenessResult(null), 4000)
@@ -329,6 +343,7 @@ export default function CandidateSession() {
 
     frameWs.onopen = () => {
       console.log('[Frames WS] Connected for real-time PRNU & rPPG forensic analysis')
+      setFramesReady(true)
 
       const canvas = document.createElement('canvas')
       canvas.width = 320
@@ -412,6 +427,7 @@ export default function CandidateSession() {
 
     frameWs.onclose = () => {
       console.log('[Frames WS] Disconnected')
+      setFramesReady(false)
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current)
     }
 
@@ -469,6 +485,24 @@ export default function CandidateSession() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [addViolationToast])
+
+  // Start-of-interview liveness check: once identity is verified, the page is in
+  // full screen and the frames socket is up. Sent once per page load.
+  useEffect(() => {
+    if (!faceVerified || !isFullscreen || !framesReady || startLivenessSentRef.current) return
+    const fws = frameWsRef.current
+    if (!fws || fws.readyState !== WebSocket.OPEN) return
+    startLivenessSentRef.current = true
+    fws.send(JSON.stringify({ type: 'LIVENESS_START' }))
+  }, [faceVerified, isFullscreen, framesReady])
+
+  const skipLiveness = useCallback(() => {
+    const fws = frameWsRef.current
+    if (fws && fws.readyState === WebSocket.OPEN) {
+      fws.send(JSON.stringify({ type: 'LIVENESS_SKIP' }))
+    }
+    try { window.speechSynthesis?.cancel() } catch { /* optional */ }
+  }, [])
 
   const formatTime = (s: number) => {
     const h = Math.floor(s / 3600)
@@ -899,8 +933,9 @@ export default function CandidateSession() {
 
   return (
     <>
-      {/* FULLSCREEN ENFORCEMENT OVERLAY */}
-      {!isFullscreen && (
+      {/* FULLSCREEN ENFORCEMENT OVERLAY — only after identity verification, so the
+          AWS Rekognition step happens first, without full-screen prompts on top */}
+      {faceVerified && !isFullscreen && (
         <div className="fixed inset-0 z-[9999] bg-[#0A0B0E]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
           <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 mb-6 border border-amber-500/30">
             <Maximize2 size={32} />
@@ -939,46 +974,63 @@ export default function CandidateSession() {
         </div>
       )}
 
-      {/* ACTIVE LIVENESS CHALLENGE — shown above every other overlay so it can't be missed */}
+      {/* ACTIVE LIVENESS CHECK — floats above everything but never blocks the
+          interview. No time limit; the candidate can close it (interviewer is told). */}
       {livenessChallenge && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,500px)] pointer-events-none animate-fade-in">
-          <style>{`@keyframes dvLivenessCountdown { from { width: 100%; } to { width: 0%; } }`}</style>
-          <div className="rounded-2xl bg-[#0F1115]/95 border border-[#A4123F] shadow-2xl shadow-[#A4123F]/30 px-6 py-5 text-center">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-gray-400 mb-3">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,520px)] pointer-events-none animate-fade-in">
+          <div className="relative pointer-events-auto rounded-2xl bg-[#0F1115]/95 border border-[#A4123F] shadow-2xl shadow-[#A4123F]/30 px-6 py-5 text-center">
+            <button
+              onClick={skipLiveness}
+              title="Close the liveness check (your interviewer will be notified)"
+              className="absolute top-3 right-3 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X size={16} />
+            </button>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-gray-400 mb-3 px-6">
+              {livenessChallenge.origin === 'interviewer' ? 'Requested by your interviewer · ' :
+                livenessChallenge.origin === 'start' ? 'Before we begin · ' : ''}
               Liveness check · step {livenessChallenge.step} of {livenessChallenge.of}
-              {livenessChallenge.retry ? ' · second try' : ''}
             </p>
-            <div className="flex items-center justify-center gap-4 mb-3">
-              {livenessChallenge.direction === 'LEFT' && <ArrowLeft size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
-              <p className="text-2xl font-bold text-white">{livenessChallenge.instruction}</p>
-              {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
-            </div>
-            <p className="text-[12px] text-gray-400 mb-3">Turn clearly, then face the screen again. Keep your face in view.</p>
+            {livenessChallenge.note === 'wrong_way' && (
+              <p className="text-[12px] font-semibold text-amber-300 mb-2">That was the other way - let's try again.</p>
+            )}
+            {livenessProgress && livenessProgress.face && !livenessProgress.armed ? (
+              <p className="text-xl font-bold text-white mb-3">Look straight at the camera</p>
+            ) : (
+              <div className="flex items-center justify-center gap-4 mb-3">
+                {livenessChallenge.direction === 'LEFT' && <ArrowLeft size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
+                <p className="text-2xl font-bold text-white">{livenessChallenge.instruction}</p>
+                {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
+              </div>
+            )}
+            <p className="text-[12px] text-gray-400 mb-3">
+              Take your time - there is no time limit. Turn clearly, then face the screen again.
+            </p>
             {livenessProgress && (
               <div className="mt-2 mb-1">
                 {livenessProgress.face ? (
-                  <>
-                    <div className="flex justify-between text-[11px] text-gray-300 mb-1">
-                      <span>{livenessProgress.wrongWay ? 'Other way - turn to the arrow side' : 'Turn detected'}</span>
-                      <span>{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                      <div className={`h-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                        style={{ width: `${Math.min(100, livenessProgress.progress * 100)}%` }} />
-                    </div>
-                  </>
+                  livenessProgress.armed && (
+                    <>
+                      <div className="flex justify-between text-[11px] text-gray-300 mb-1">
+                        <span>{livenessProgress.wrongWay ? 'Other way - turn to the arrow side' : 'Turn detected'}</span>
+                        <span>{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                        <div className={`h-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                          style={{ width: `${Math.min(100, livenessProgress.progress * 100)}%` }} />
+                      </div>
+                    </>
+                  )
                 ) : (
                   <p className="text-[12px] font-semibold text-amber-300">Face not detected - keep your face in view and well lit</p>
                 )}
               </div>
             )}
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div
-                key={livenessChallenge.key}
-                className="h-full bg-[#A4123F]"
-                style={{ animation: `dvLivenessCountdown ${livenessChallenge.timeoutMs}ms linear forwards` }}
-              />
-            </div>
+            {livenessFailNotice && (
+              <p className="mt-3 text-[12px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                {livenessFailNotice}
+              </p>
+            )}
           </div>
         </div>
       )}

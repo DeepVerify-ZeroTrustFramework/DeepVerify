@@ -152,6 +152,16 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
     elif "VIRTUAL" in alert_type or "OBS" in alert_type:
         telemetry["virtual_camera_detected"] = False
 
+    # Excusing a failed/skipped liveness check removes its trust-score penalty
+    if module_name == "LIVENESS" or alert_type in ("LIVENESS_FAIL", "LIVENESS_SKIPPED"):
+        telemetry["liveness_failed"] = False
+        try:
+            from api.routes.frames import _session_analyzers
+            if session_id in _session_analyzers:
+                _session_analyzers[session_id]["liveness_failed"] = False
+        except Exception:
+            pass
+
     if module_name == "PRNU" or "FINGERPRINT" in alert_type or "PRNU" in alert_type or "PRNU" in alert_id.upper():
         telemetry["prnu_excused"] = True
     elif module_name == "RPPG" or "PULSE" in alert_type or "LIVENESS" in alert_type or "RPPG" in alert_type:
