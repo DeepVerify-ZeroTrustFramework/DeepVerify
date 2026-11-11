@@ -788,6 +788,9 @@ async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, th
     await _run_fusion(session_id, analyzers, thresholds)
 
 
+FRAME_STALL_CAMERA_OFF_S = 10.0
+
+
 async def _process_event(session_id: str, msg: dict, analyzers: dict):
     """Process a behavioral event or gaze data message."""
     event_type = msg.get('type', '')
@@ -861,7 +864,12 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
         pass
 
     is_cam_active = analyzers.get('camera_active', True)
-    if time.time() - analyzers.get('last_frame_received_at', time.time()) > 3.0:
+    # Treat the camera as off only after a LONG gap. On a real two-laptop call the
+    # candidate's uplink also carries the WebRTC video, so frame uploads can stall
+    # for a few seconds; the old 3s limit flagged a working camera as "turned off"
+    # and zeroed PRNU / rPPG / jitter / behavioral. An explicit CAMERA_STATUS
+    # from the candidate still switches it off immediately.
+    if time.time() - analyzers.get('last_frame_received_at', time.time()) > FRAME_STALL_CAMERA_OFF_S:
         is_cam_active = False
 
     pce_val = analyzers['last_pce']

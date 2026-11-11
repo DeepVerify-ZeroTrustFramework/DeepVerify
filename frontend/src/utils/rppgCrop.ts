@@ -42,6 +42,8 @@ export function startRppgCropStream(
       return
     }
     if (ws.readyState !== WebSocket.OPEN || !enabled() || !ctx) return
+    // Skip when the socket is backed up (slow uplink) so crops stay real-time
+    if (ws.bufferedAmount > 256 * 1024) return
     if (!box || Date.now() - box.t > 3000) return // no recent face position
     if (ws.bufferedAmount > 512 * 1024) return     // network can't keep up: skip
     const video = getVideo()

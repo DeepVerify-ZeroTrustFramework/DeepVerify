@@ -63,6 +63,10 @@ interface ToastViolation {
   timestamp: number
 }
 
+// Max bytes allowed to sit unsent in the forensic-frames WebSocket before new
+// frames are dropped. Keeps analysis real-time on slow / shared uplinks.
+const FRAME_WS_MAX_BUFFERED = 256 * 1024
+
 export default function CandidateSession() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
@@ -343,6 +347,9 @@ export default function CandidateSession() {
       const frameInterval = setInterval(() => {
         if (!camEnabledRef.current) return // Do NOT capture or transmit frames when camera is disabled
         if (!frameWs || frameWs.readyState !== WebSocket.OPEN) return
+        // Back-pressure: if earlier frames are still queued (slow uplink), skip
+        // this tick instead of piling up seconds of stale frames.
+        if (frameWs.bufferedAmount > FRAME_WS_MAX_BUFFERED) return
         const video = selfVideoRef.current
         if (!video || video.readyState < 2) return
 

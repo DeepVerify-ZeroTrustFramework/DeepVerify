@@ -31,7 +31,9 @@ function buildSignalingUrl(sessionId: string, role: string): string {
   return getWsUrl(`/ws/signaling/${sessionId}?role=${role}`)
 }
 
-// ── Fallback ICE config (used only if the backend endpoint is unreachable) ──
+// ── Fallback ICE config — used ONLY if the backend /api/webrtc/ice-servers call fails.
+// The real relays (ExpressTURN + Metered) are configured on the BACKEND. These
+// optional VITE_TURN_* build-time vars can point at any single TURN server. ──
 const TURN_URL = import.meta.env.VITE_TURN_URL || ''
 const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME || ''
 const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL || ''
@@ -87,7 +89,8 @@ function tuneReceiver(receiver: RTCRtpReceiver) {
   try { (receiver as any).jitterBufferTarget = 0 } catch { /* unsupported */ }
 }
 
-/** Prefer smooth, low-delay video over resolution; cap bitrate to avoid queueing. */
+/** Prefer smooth, low-delay video over resolution; cap bitrate to avoid queueing
+ *  and to leave uplink room for the forensic frame upload. */
 async function tuneSender(sender: RTCRtpSender) {
   if (!sender.track) return
   try {
@@ -95,7 +98,8 @@ async function tuneSender(sender: RTCRtpSender) {
       ;(sender.track as any).contentHint = 'motion'
       const p = sender.getParameters()
       if (!p.encodings || p.encodings.length === 0) p.encodings = [{}]
-      p.encodings[0].maxBitrate = 1_200_000
+      // ~700 kbps is plenty for a talking head and roughly halves TURN usage
+      p.encodings[0].maxBitrate = 700_000
       p.encodings[0].maxFramerate = 30
       ;(p as any).degradationPreference = 'maintain-framerate'
       await sender.setParameters(p)
