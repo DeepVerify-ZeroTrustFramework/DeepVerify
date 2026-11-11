@@ -177,6 +177,8 @@ class ChallengeManager:
     # Live demo only: a step with no correct turn within this many seconds counts
     # as a wrong attempt (so a still replay visibly fails). None = no time limit.
     step_timeout: Optional[float] = None
+    # Live demo only: end the check once it has been reported as failed.
+    close_on_fail: bool = False
 
     # internal
     _pending: Optional[str] = None          # origin of a requested check not yet issued
@@ -399,6 +401,13 @@ class ChallengeManager:
                         'reason': reason,
                         'message': "That didn't match the instructions. Your interviewer has been "
                                    "notified - you can keep trying or close this check."})
+        if self._fail_reported and self.close_on_fail:
+            self._step = None
+            self._schedule_auto(now)
+            return out + [{'type': 'LIVENESS_CHALLENGE_RESULT', 'challenge_id': self._challenge_id,
+                           'passed': False, 'final': True, 'origin': self._origin,
+                           'reason': reason, 'wrong_attempts': self._wrong_attempts,
+                           'message': 'Liveness check could not be completed.'}]
         # Start over with a fresh random sequence (the candidate must come back to front first)
         self._new_sequence()
         return out + self._issue_step(now, note='wrong_way')

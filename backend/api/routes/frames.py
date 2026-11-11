@@ -19,9 +19,6 @@ from modules.jitter import JitterAnalyzer
 from modules.behavioral import BehavioralTracker
 from modules.axiom import axiom_fusion_engine
 from modules.liveness_challenge import ChallengeManager, make_yaw_estimator
-# Demo pages (LiveDemo / uploaded Demo) keep the ORIGINAL liveness behaviour,
-# unchanged: automatic timed checks. Interviews use ChallengeManager above.
-from modules.liveness_challenge_demo import ChallengeManager as DemoChallengeManager
 import uuid
 from api.routes.enrollment import get_prnu_reference
 from datetime import datetime
@@ -106,9 +103,9 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: st
         }
         a = _session_analyzers[session_id]
         # Active liveness. Interviews: checks at the start and on the interviewer's
-        # request, no time limit. Demo pages: the original automatic checks.
+        # request, no time limit. Live demo: same logic plus automatic checks (see below).
         a['is_demo'] = demo
-        a['liveness'] = (DemoChallengeManager if demo else ChallengeManager)(
+        a['liveness'] = ChallengeManager(
             session_id, yaw_fn=(lambda _f, a=a: a.get('_last_yaw')) if a['face_mesh'] is not None else None)
     return _session_analyzers[session_id]
 
@@ -152,9 +149,15 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
     analyzers = get_or_create_analyzers(session_id, merged_thresholds, source=source, strict_prnu=live_demo,
                                         demo=is_demo)
     if live_demo and analyzers.get('liveness') is not None:
-        # Demo pacing: first check after ~10 s, then every 30-45 s
-        analyzers['liveness'].first_delay = 10.0
-        analyzers['liveness'].interval = (30.0, 45.0)
+        # Live demo: same liveness logic as interviews, plus automatic checks
+        # (first after ~10 s, then every 30-45 s) and a 10 s limit per step so a
+        # replayed video visibly fails; the check closes once it has failed.
+        lm_demo = analyzers['liveness']
+        lm_demo.auto = True
+        lm_demo.step_timeout = 10.0
+        lm_demo.close_on_fail = True
+        lm_demo.first_delay = 10.0
+        lm_demo.interval = (30.0, 45.0)
     K_hat = None  # PRNU v2 reference lives in analyzers['prnu']
     ref = analyzers['prnu'].enrolled
     print(f"[Frames] Session {session_id} connected. PRNU enrollment fingerprint: "
@@ -196,11 +199,6 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                 # Text message: JSON behavioral event or gaze data
                 try:
                     msg = json.loads(data['text'])
-                    if msg.get('type') == 'LIVENESS_REQUEST' and analyzers.get('is_demo'):
-                        # Live demo button: run a head-turn check now (original behaviour)
-                        if analyzers.get('liveness') is not None:
-                            analyzers['liveness'].request_now()
-                        continue
                     if msg.get('type') in ('LIVENESS_REQUEST', 'LIVENESS_START'):
                         # LIVENESS_START: candidate page, once identity check + full
                         # screen are done. LIVENESS_REQUEST: live-demo button.
@@ -333,37 +331,7 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
     # challenge instead of failing it. Leaving the tab is flagged separately.
     tab_away = (analyzers.get('tab_hidden', False) or
                 time.time() - analyzers.get('tab_visible_since', 0.0) < 2.0)
-    # Demo pages: original behaviour (timed checks, cancelled while the tab is hidden).
-    if analyzers.get('is_demo') and websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
-        lm_ = analyzers['liveness']
-        if tab_away:
-            for m in lm_.cancel() if lm_.active else []:
-                try:
-                    await websocket.send_json(m)
-                except Exception:
-                    pass
-            liveness_msgs = []
-        else:
-            try:
-                liveness_msgs = lm_.on_frame(frame)
-            except Exception as e:
-                print(f"[Liveness] Error: {e}")
-                liveness_msgs = []
-        for m in liveness_msgs:
-            # The challenge asks for head turns: keep the gaze module from flagging them.
-            try:
-                from api.routes.ws_handlers import _get_telemetry
-                quiet = 10.0 if m.get('type') == 'LIVENESS_CHALLENGE' else 4.0
-                _get_telemetry(session_id)['_liveness_quiet_until'] = time.time() + quiet
-            except Exception:
-                pass
-            try:
-                await websocket.send_json(m)
-            except Exception:
-                pass
-            await _handle_liveness_event_demo(session_id, m, analyzers, thresholds)
-
-    elif websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
+    if websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
         lm_ = analyzers['liveness']
         # A hidden tab pauses the check (no time limit, so nothing is lost).
         if not tab_away:
@@ -487,7 +455,7 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_FINGERPRINT_CHANGE', 'MEDIUM', 'PRNU',
             f'Live video no longer matches the camera fingerprint of {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
-            ('— running a liveness check' if analyzers.get('is_demo') else '— consider running a liveness check'), float(decision['pce'])))
+            + ('— running a liveness check' if analyzers.get('is_demo') else '— consider running a liveness check'), float(decision['pce'])))
         _request_liveness(analyzers)
     elif streak == 60:
         await _publish_once(session_id, analyzers, _make_alert(
@@ -722,7 +690,7 @@ def _request_liveness(analyzers: dict):
     if analyzers.get('is_demo'):
         lm = analyzers.get('liveness')
         if lm is not None and getattr(lm, 'enabled', False):
-            lm.request_now()
+            lm.request_now(origin='auto')
     _request_ai_face_check(analyzers, 'anomaly')
 
 
@@ -896,51 +864,6 @@ async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, th
         'alert_type': alert_type, 'alertType': alert_type,
         'module': 'LIVENESS', 'severity': severity,
         'value': float(msg.get('wrong_attempts') or 0),
-        'timestamp': datetime.utcnow().isoformat(), 'acknowledged': False,
-        'message': text, 'description': text,
-    }
-    try:
-        await publish_alert(session_id, alert)
-        await get_alerts_collection().insert_one({'session_id': session_id, **{k: v for k, v in alert.items() if k != 'type'}})
-    except Exception as e:
-        print(f"[Liveness] Could not publish alert: {e}")
-    # Update the trust gauge right away rather than waiting for the next fusion tick
-    analyzers['last_fusion_time'] = time.time()
-    await _run_fusion(session_id, analyzers, thresholds)
-
-
-async def _handle_liveness_event_demo(session_id: str, msg: dict, analyzers: dict, thresholds: dict):
-    """Demo pages only (original, unchanged): challenge result -> alert + trust-score effect."""
-    if msg.get('type') != 'LIVENESS_CHALLENGE_RESULT':
-        return
-    lm = analyzers['liveness']
-    if msg.get('passed'):
-        alert_type, severity = 'LIVENESS_PASS', 'LOW'
-        text = f'Active liveness check passed (random head turns verified) — {lm.passes} passed so far'
-        failed = False
-    elif msg.get('final'):
-        alert_type, severity = 'LIVENESS_FAIL', 'CRITICAL'
-        text = (f"Active liveness check FAILED twice: {msg.get('reason', 'no response')}. "
-                f"Possible pre-recorded, AI-generated or injected video.")
-        failed = True
-    else:
-        return  # first miss — candidate gets one retry before anything is flagged
-
-    analyzers['liveness_failed'] = failed
-    if failed:
-        _request_ai_face_check(analyzers, 'liveness_fail')
-    try:
-        from api.routes.ws_handlers import _get_telemetry
-        _get_telemetry(session_id)['liveness_failed'] = failed
-    except Exception:
-        pass
-
-    aid = str(uuid.uuid4())
-    alert = {
-        'type': 'ALERT', 'alert_id': aid, 'alertId': aid,
-        'alert_type': alert_type, 'alertType': alert_type,
-        'module': 'LIVENESS', 'severity': severity,
-        'value': float(lm.passes if not failed else lm.failures),
         'timestamp': datetime.utcnow().isoformat(), 'acknowledged': False,
         'message': text, 'description': text,
     }
