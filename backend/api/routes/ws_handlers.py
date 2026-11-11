@@ -157,7 +157,7 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
         telemetry["liveness_failed"] = False
         try:
             from api.routes.frames import _session_analyzers
-            if session_id in _session_analyzers:
+            if session_id in _session_analyzers and not _session_analyzers[session_id].get("is_demo"):
                 _session_analyzers[session_id]["liveness_failed"] = False
         except Exception:
             pass

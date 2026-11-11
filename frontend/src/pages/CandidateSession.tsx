@@ -414,7 +414,7 @@ export default function CandidateSession() {
       frameIntervalRef.current = frameInterval
 
       // rPPG: ~15 fps native-resolution face crops (stops when the socket closes)
-      startRppgCropStream(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
+      startRppgCropStream(frameWs, () => selfVideoRef.current, () => camEnabledRef.current, FRAME_WS_MAX_BUFFERED)
       // Jitter: the camera's own frame timing
       startFrameTiming(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
       // AI face check: answer the server's occasional snapshot requests

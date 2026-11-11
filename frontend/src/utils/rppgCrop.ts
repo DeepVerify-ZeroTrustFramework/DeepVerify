@@ -15,6 +15,9 @@ export function startRppgCropStream(
   ws: WebSocket,
   getVideo: () => HTMLVideoElement | null,
   enabled: () => boolean = () => true,
+  // Interviews only: skip a crop while more than this many bytes are still
+  // queued on the socket (slow uplink). Undefined = original behaviour (demo).
+  maxBuffered?: number,
 ): () => void {
   let box: FaceBox | null = null
   const canvas = document.createElement('canvas')
@@ -42,8 +45,7 @@ export function startRppgCropStream(
       return
     }
     if (ws.readyState !== WebSocket.OPEN || !enabled() || !ctx) return
-    // Skip when the socket is backed up (slow uplink) so crops stay real-time
-    if (ws.bufferedAmount > 256 * 1024) return
+    if (maxBuffered !== undefined && ws.bufferedAmount > maxBuffered) return
     if (!box || Date.now() - box.t > 3000) return // no recent face position
     if (ws.bufferedAmount > 512 * 1024) return     // network can't keep up: skip
     const video = getVideo()
