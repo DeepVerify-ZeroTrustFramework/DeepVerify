@@ -86,6 +86,25 @@ def estimate_prnu_reference(frames_list: List[np.ndarray]) -> np.ndarray:
 
 
 # ── Matching ─────────────────────────────────────────────────────────────────
+def _pce_shift_search(a: np.ndarray, b: np.ndarray, radius: int = 20):
+    """Signed PCE of the best correlation peak within +-radius pixels, and its shift.
+    Tolerates webcams whose output window drifts across the sensor (automatic
+    framing / digital pan). Random matches stay low: AI videos peak at ~8-21."""
+    a = a - a.mean(); b = b - b.mean()
+    xc = np.real(np.fft.ifft2(np.fft.fft2(a) * np.conj(np.fft.fft2(b))))
+    h, w = xc.shape
+    ys = np.r_[0:radius + 1, h - radius:h]; xs = np.r_[0:radius + 1, w - radius:w]
+    sub = xc[np.ix_(ys, xs)]
+    k = np.unravel_index(np.argmax(sub), sub.shape)
+    py, px = int(ys[k[0]]), int(xs[k[1]])
+    m = np.ones_like(xc, bool)
+    m[np.ix_([(py + d) % h for d in range(-5, 6)], [(px + d) % w for d in range(-5, 6)])] = False
+    pk = xc[py, px]
+    pce = float(np.sign(pk) * pk ** 2 / (np.mean(xc[m] ** 2) + 1e-30))
+    return pce, (py if py <= h // 2 else py - h, px if px <= w // 2 else px - w)
+
+
+
 def _pce_zero_shift(a: np.ndarray, b: np.ndarray) -> float:
     """Signed PCE of the cross-correlation peak near zero shift."""
     a = a - a.mean(); b = b - b.mean()
@@ -156,8 +175,13 @@ class PRNUTracker:
     QUALITY_SKIP = 10      # ignore crops right after enrollment (same scene → optimistic)
     QUALITY_CROPS = 15     # ~4.5 s window; every check in it must pass (worst case, not median)
 
-    def __init__(self, enrolled: Optional[dict] = None):
+    def __init__(self, enrolled: Optional[dict] = None, strict_reference: bool = False):
         self.enrolled = enrolled            # {'K': 2-D array, 'width': int, 'height': int}
+        # strict_reference (live demo): judge EVERY source only against the enrolled
+        # webcam, whatever its resolution, and never against the stream itself.
+        # A video file matches its own repeating pattern (codec/AI texture), so
+        # self-referencing would call an AI clip 'the same camera'.
+        self.strict_reference = bool(strict_reference and enrolled is not None)
         self.K_sess: Optional[np.ndarray] = None
         self.K_enr: Optional[np.ndarray] = None
         # Running MLE sums: crops confirmed as the same camera keep refining K_sess,
@@ -188,6 +212,43 @@ class PRNUTracker:
         K = K - K.mean(); K = K - K.mean(axis=1, keepdims=True); K = K - K.mean(axis=0, keepdims=True)
         self.K_sess = K
 
+    STRICT_AGG = 8          # crops per decision in strict mode (steadier than 5)
+    STRICT_ENR_WEIGHT = 30  # enrollment counts as this many crops in the reference
+
+    def _strict_check(self, W, I) -> Optional[dict]:
+        if getattr(self, '_K_ref', None) is None:
+            if self.K_enr is None:
+                self.K_enr = np.asarray(self.enrolled['K'], dtype=np.float64)
+            self._K_ref = self.K_enr.copy()
+            self._conf_num = np.zeros_like(self.K_enr); self._conf_den = np.zeros_like(self.K_enr)
+            self._conf_n = 0
+        self._agg.append((W, I))
+        self._agg = self._agg[-self.STRICT_AGG:]
+        if len(self._agg) < 3:
+            self.state = 'checking'
+            return None
+        Wsum = sum(w for w, _ in self._agg); Isum = sum(i for _, i in self._agg)
+        pce, (sy, sx) = _pce_shift_search(Wsum, self._K_ref * Isum)
+        self.pce = self.pce_enrollment = float(pce)
+        self.match = match_score(self.pce)
+        self.state = ('match' if self.pce >= PCE_MATCH else
+                      'mismatch' if self.pce <= PCE_MISMATCH else 'uncertain')
+        self.reference = 'enrollment'
+        # Strengthen the reference with crops confirmed against the enrolled camera
+        # (as the interview does with its session fingerprint). A different source
+        # never matches, so it can never be folded in.
+        if self.state == 'match':
+            # Align to the reference before folding in (the image may have drifted)
+            self._conf_num += np.roll(W * I, (-sy, -sx), axis=(0, 1))
+            self._conf_den += np.roll(I * I, (-sy, -sx), axis=(0, 1))
+            self._conf_n += 1
+            if self._conf_n % 10 == 0:
+                K_conf = self._conf_num / (self._conf_den + 1e-9)
+                n = min(self._conf_n, 300)
+                self._K_ref = (self.STRICT_ENR_WEIGHT * self.K_enr + n * K_conf) / (self.STRICT_ENR_WEIGHT + n)
+        return {'pce': self.pce, 'match': self.match, 'state': self.state, 'reference': 'enrollment',
+                'quality_ok': True, 'pce_session': None, 'pce_enrollment': self.pce}
+
     def _early_enrollment_check(self, W, I) -> Optional[dict]:
         if self.K_enr is None:
             return None
@@ -213,7 +274,13 @@ class PRNUTracker:
         if self.camera_res is None:
             self.camera_res = (cam_w, cam_h)
             en = self.enrolled
-            if en is not None and (int(en.get('width', 0)), int(en.get('height', 0))) == (cam_w, cam_h):
+            if en is not None:
+                # The system check and the interview open the camera the same way, so a
+                # genuine candidate's resolution matches. A different one from the very
+                # first frame means a different source: flag it, and still judge against
+                # the system-check fingerprint (never let a stream match only itself).
+                if (int(en.get('width', 0)), int(en.get('height', 0))) != (cam_w, cam_h):
+                    self.res_changed = True
                 self.K_enr = np.asarray(en['K'], dtype=np.float64)
         elif self.camera_res != (cam_w, cam_h):
             self.res_changed = True        # different capture mode or a different device
@@ -221,6 +288,13 @@ class PRNUTracker:
 
         I = _green(crop_bgr)
         W = _residual_gray(I)
+
+        # With a system-check fingerprint for this camera mode, judge every window
+        # against it (drift-tolerant, refined with aligned confirmed crops). This is
+        # the check validated on live webcams with automatic framing: 91-97% match
+        # on the genuine camera, 100% mismatch for AI videos and replayed files.
+        if self.strict_reference or self.K_enr is not None:
+            return self._strict_check(W, I)
 
         # Fast start: while the session fingerprint is still being built (~15 s),
         # compare against the fingerprint stored at the system check. Three
@@ -248,7 +322,7 @@ class PRNUTracker:
             return None
         Wsum = sum(w for w, _ in self._agg)
         Isum = sum(i for _, i in self._agg)
-        self.pce_session = _pce_zero_shift(Wsum, self.K_sess * Isum)
+        self.pce_session, (sy, sx) = _pce_shift_search(Wsum, self.K_sess * Isum)
 
         # Quality gate (once): is this camera's sensor pattern measurable at all?
         if self.quality_ok is None:
@@ -283,8 +357,9 @@ class PRNUTracker:
         self.state = ('match' if self.pce >= PCE_MATCH else
                       'mismatch' if self.pce <= PCE_MISMATCH else 'uncertain')
         if self.state == 'match' and self.pce_session >= PCE_MATCH:
-            # Confirmed same camera: fold this crop into the session fingerprint
-            self._num += W * I; self._den += I * I
+            # Confirmed same camera: fold this crop (aligned) into the session fingerprint
+            self._num += np.roll(W * I, (-sy, -sx), axis=(0, 1))
+            self._den += np.roll(I * I, (-sy, -sx), axis=(0, 1))
             self._since_refresh = getattr(self, '_since_refresh', 0) + 1
             if self._since_refresh >= 10:
                 self._refresh_k(); self._since_refresh = 0

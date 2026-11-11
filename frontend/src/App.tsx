@@ -5,7 +5,7 @@ import SystemCheck from './pages/SystemCheck'
 import CandidateSession from './pages/CandidateSession'
 import InterviewerDash from './pages/InterviewerDash'
 import NotFound from './pages/NotFound'
-import DemoMode from './pages/DemoMode'
+import LiveDemo from './pages/LiveDemo'
 
 // Role-based auth & portal pages
 import CandidateLogin from './pages/auth/CandidateLogin'
@@ -44,7 +44,8 @@ function App() {
           <Route path="/dashboard/:sessionId" element={<InterviewerDash />} />
 
           {/* Demo Mode */}
-          <Route path="/demo" element={<DemoMode />} />
+          <Route path="/demo" element={<LiveDemo />} />
+          <Route path="/demo/live" element={<Navigate to="/demo" replace />} />
 
           {/* Fallbacks */}
           <Route path="/404" element={<NotFound />} />

@@ -171,6 +171,10 @@ class ChallengeManager:
         return ENABLED and self.yaw_fn is not None
 
     # -- scheduling ------------------------------------------------------------
+    # Per-session timing overrides (the live demo uses short intervals)
+    first_delay: Optional[float] = None
+    interval: Optional[tuple] = None
+
     def request_now(self, now: Optional[float] = None):
         """Ask for a challenge as soon as possible (e.g. interviewer button)."""
         now = time.time() if now is None else now
@@ -178,7 +182,8 @@ class ChallengeManager:
             self._next_at = now
 
     def _schedule_next(self, now: float, delay: Optional[float] = None):
-        self._next_at = now + (delay if delay is not None else self.rng.uniform(INTERVAL_MIN, INTERVAL_MAX))
+        lo, hi = self.interval if self.interval else (INTERVAL_MIN, INTERVAL_MAX)
+        self._next_at = now + (delay if delay is not None else self.rng.uniform(lo, hi))
 
     def _baseline(self, now: float) -> Optional[float]:
         recent = [y for t, y in self._yaw_hist if now - t <= 1.5]
@@ -229,7 +234,7 @@ class ChallengeManager:
             # Schedule from the first FRAME, not the first detected face — a feed
             # that never shows a usable face must not escape challenges.
             self._first_face_at = now
-            self._schedule_next(now, FIRST_DELAY)
+            self._schedule_next(now, self.first_delay if self.first_delay is not None else FIRST_DELAY)
         if yaw is not None:
             self._yaw_hist.append((now, yaw))
         self._yaw_hist = [(t, y) for t, y in self._yaw_hist if now - t <= 4.0]
@@ -271,6 +276,19 @@ class ChallengeManager:
                 st.consec = 0
             if st.consec >= CONSEC and st.frontal_seen and not st.wrong_way:
                 return self._step_passed(now)
+
+        # Live feedback for the candidate (and for debugging): ~3 times a second,
+        # how far the head has turned towards the target (1.0 = enough), and
+        # whether the face is visible at all.
+        if st.frames % 3 == 0:
+            if yaw is not None:
+                sgn = 1.0 if st.direction == 'LEFT' else -1.0
+                prog = max(0.0, sgn * (yaw - st.baseline)) / THRESH
+            else:
+                prog = 0.0
+            out.append({'type': 'LIVENESS_PROGRESS', 'challenge_id': self._challenge_id,
+                        'step': self._step_idx + 1, 'face': yaw is not None,
+                        'progress': round(min(prog, 1.5), 2), 'wrong_way': bool(st.wrong_way)})
 
         if elapsed >= STEP_TIMEOUT or (elapsed > MAX_LATENCY + 0.3 and st.consec == 0):
             if st.face_frames == 0:

@@ -7,6 +7,7 @@ and publishes trust score updates to Redis for the interviewer dashboard.
 """
 import json
 import time
+import asyncio
 import numpy as np
 import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -28,6 +29,14 @@ router = APIRouter()
 # the server as FACE_BOX) from the camera's own pixels at ~15 fps, so the pulse is
 # read from cleaner, more frequent samples than the 10 fps 320x240 frames.
 RPPG_MAGIC = b'DVRP'
+# AI face check (Sightengine): full-resolution snapshot requested from the browser,
+# sent back as b'DVSN' + JPEG. Few per session (free-plan budget).
+SNAP_MAGIC = b'DVSN'
+AI_FACE_MAX_PER_SESSION = 3           # free plan: ~25 checks/day, 10 operations each
+AI_FACE_FIRST_AFTER_FRAMES = 200      # ~20 s of frames at 10 fps
+AI_FACE_MIN_GAP = 30.0                # seconds between checks
+AI_DEEPFAKE_FLAG = 0.30               # tested: real faces <= 0.12, face swaps 0.32-0.90
+AI_GENAI_FLAG = 0.50                  # tested: real faces 0.001, AI-generated 0.87-0.99
 RPPG_CROP_FS = 15.0
 import os as _os
 FACE_NECK_SCORING = _os.getenv('DV_FACE_NECK_SCORING', '0') == '1'
@@ -36,7 +45,8 @@ FACE_NECK_SCORING = _os.getenv('DV_FACE_NECK_SCORING', '0') == '1'
 _session_analyzers: dict = {}
 
 
-def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: str = 'webrtc'):
+def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: str = 'webrtc',
+                            strict_prnu: bool = False):
     """Get or create the analysis pipeline for a session."""
     if session_id not in _session_analyzers:
         thresholds = thresholds or {}
@@ -58,7 +68,7 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: st
             'last_fusion_time': 0.0,
             'frame_count': 0,
             # PRNU v2: fed with native-resolution crops (b'DVPR' packets) from the browser
-            'prnu': PRNUTracker(enrolled=get_prnu_reference(session_id)),
+            'prnu': PRNUTracker(enrolled=get_prnu_reference(session_id), strict_reference=strict_prnu),
             'prnu_mismatch_streak': 0,
             'last_pce': 0.0,  # Zero-Trust default: unverified until live calculation passes
             '_alert_last': {},   # alert_type -> last publish time (de-duplication)
@@ -87,6 +97,9 @@ def get_or_create_analyzers(session_id: str, thresholds: dict = None, source: st
             'crop_mesh': None,          # built on the first crop
             'last_rppg_crop_at': 0.0,
             '_face_box_sent_at': 0.0,
+            # AI face check (external, a few snapshots per session)
+            'ai_face': {'checks': 0, 'want': None, 'pending_since': 0.0, 'last_at': 0.0,
+                        'first_done': False, 'flag': False},
         }
         a = _session_analyzers[session_id]
         # Active liveness: random server-verified head-turn challenges
@@ -126,8 +139,15 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
     # Determine source based on interview type
     interview_type = session_doc.get('interview_type', 'Technical')
     source = 'upload' if interview_type == 'Demo' else 'webrtc'
+    # Live demo: streamed like an interview, but any source (webcam, OBS, a video
+    # file) is judged against the webcam enrolled at the start of the demo.
+    live_demo = interview_type == 'LiveDemo'
 
-    analyzers = get_or_create_analyzers(session_id, merged_thresholds, source=source)
+    analyzers = get_or_create_analyzers(session_id, merged_thresholds, source=source, strict_prnu=live_demo)
+    if live_demo and analyzers.get('liveness') is not None:
+        # Demo pacing: first check after ~10 s, then every 30-45 s
+        analyzers['liveness'].first_delay = 10.0
+        analyzers['liveness'].interval = (30.0, 45.0)
     K_hat = None  # PRNU v2 reference lives in analyzers['prnu']
     ref = analyzers['prnu'].enrolled
     print(f"[Frames] Session {session_id} connected. PRNU enrollment fingerprint: "
@@ -143,6 +163,10 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                     await _process_prnu_crop(session_id, data['bytes'], analyzers, merged_thresholds)
                 except Exception as e:
                     print(f"[PRNU] Error processing crop: {e}")
+
+            elif 'bytes' in data and data['bytes'] and data['bytes'][:4] == SNAP_MAGIC:
+                # Binary message: full-resolution snapshot for the AI face check
+                asyncio.create_task(_run_ai_face_check(session_id, data['bytes'][4:], analyzers))
 
             elif 'bytes' in data and data['bytes'] and data['bytes'][:4] == RPPG_MAGIC:
                 # Binary message: native-resolution face crop for rPPG
@@ -165,6 +189,16 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                 # Text message: JSON behavioral event or gaze data
                 try:
                     msg = json.loads(data['text'])
+                    if msg.get('type') == 'LIVENESS_REQUEST':
+                        # Live demo button: run a head-turn check now
+                        if analyzers.get('liveness') is not None:
+                            analyzers['liveness'].request_now()
+                        continue
+                    if msg.get('type') == 'SOURCE_KIND':
+                        # Live demo: informational only. Files get head-turn checks too
+                        # (a replay failing them is the point); never used in the verdict.
+                        analyzers['source_is_file'] = msg.get('kind') == 'file'
+                        continue
                     if msg.get('type') == 'TAB_VISIBILITY':
                         hidden = bool(msg.get('hidden'))
                         analyzers['tab_hidden'] = hidden
@@ -250,6 +284,20 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
                                        'w': round(x1 - x0, 4), 'h': round(y1 - y0, 4)})
         except Exception:
             pass
+
+    # --- AI face check: ask the browser for a snapshot when one is due ---
+    af = analyzers.get('ai_face')
+    if af is not None and websocket is not None:
+        if not af['first_done'] and analyzers['frame_count'] >= AI_FACE_FIRST_AFTER_FRAMES:
+            af['first_done'] = True
+            _request_ai_face_check(analyzers, 'routine')
+        now_t = time.time()
+        if af['want'] and (now_t - af['pending_since'] > 15.0):
+            af['pending_since'] = now_t
+            try:
+                await websocket.send_json({'type': 'SNAPSHOT_REQUEST', 'reason': af['want']})
+            except Exception:
+                pass
 
     # --- rPPG Analysis ---
     # Preferred input: the face-crop stream (see _process_rppg_crop). Fall back to
@@ -359,7 +407,7 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
     if tr.res_changed and not was_res_changed:
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_CAMERA_CHANGE', 'HIGH', 'PRNU',
-            f'Camera resolution changed mid-session (now {cam_w}x{cam_h}) — possible switch to another device or video source',
+            f'Camera resolution ({cam_w}x{cam_h}) differs from the system check or changed mid-session — possible switch to another device or video source',
             float(cam_w * cam_h)))
         _request_liveness(analyzers)
 
@@ -379,7 +427,8 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
         analyzers['prnu_match'] = 1.0
     print(f"[PRNU] {session_id} PCE={decision['pce']:.1f} state={decision['state']} ref={decision['reference']}")
 
-    if decision['state'] == 'low_signal':
+    # (Uploaded files: PRNU is not applicable, so no low-signal notice either.)
+    if decision['state'] == 'low_signal' and analyzers['rppg'].source != 'upload':
         # This camera's sensor pattern isn't measurable (heavy in-camera denoising
         # or very low light). Say so once; never accuse the candidate because of it.
         await _publish_once(session_id, analyzers, _make_alert(
@@ -405,14 +454,14 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
     if streak == 6:
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_FINGERPRINT_CHANGE', 'MEDIUM', 'PRNU',
-            f'Camera sensor fingerprint no longer matches {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
+            f'Live video no longer matches the camera fingerprint of {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
             f'— running a liveness check', float(decision['pce'])))
         _request_liveness(analyzers)
     elif streak == 60:
         await _publish_once(session_id, analyzers, _make_alert(
             'IDENTITY_FRAUD', 'HIGH', 'PRNU',
-            f'Camera sensor fingerprint has not matched {where} for 20 s (PCE={decision["pce"]:.1f}) '
-            f'— likely a different camera or an injected video source', float(decision['pce'])))
+            f'Live video has not matched the camera fingerprint of {where} for 20 s (PCE={decision["pce"]:.1f}) '
+            f'— a different camera, a replayed recording or an injected video', float(decision['pce'])))
 
     try:
         from api.routes.ws_handlers import _get_telemetry
@@ -639,6 +688,59 @@ def _request_liveness(analyzers: dict):
     lm = analyzers.get('liveness')
     if lm is not None and getattr(lm, 'enabled', False):
         lm.request_now()
+    _request_ai_face_check(analyzers, 'anomaly')
+
+
+def _request_ai_face_check(analyzers: dict, reason: str):
+    """Queue one AI face check (snapshot), within the per-session budget."""
+    from modules.ai_face_check import enabled as _ai_enabled
+    af = analyzers.get('ai_face')
+    if af is None or not _ai_enabled() or af['want']:
+        return
+    if af['checks'] >= AI_FACE_MAX_PER_SESSION or time.time() - af['last_at'] < AI_FACE_MIN_GAP:
+        return
+    af['want'] = reason
+    af['pending_since'] = 0.0
+
+
+async def _run_ai_face_check(session_id: str, jpeg: bytes, analyzers: dict):
+    """Send the snapshot to Sightengine (deepfake + genai) and report the result."""
+    from modules.ai_face_check import check_face_image
+    af = analyzers.get('ai_face')
+    if af is None or not af['want'] or len(jpeg) < 1000:
+        return
+    reason = af['want']
+    af['want'] = None
+    af['checks'] += 1
+    af['last_at'] = time.time()
+    r = await asyncio.to_thread(check_face_image, jpeg)
+    if not r.get('ok'):
+        print(f"[AIFace] {session_id} check failed: {r.get('error')}")
+        return
+    df = float(r.get('deepfake') or 0.0); ai = float(r.get('ai_generated') or 0.0)
+    flagged = df >= AI_DEEPFAKE_FLAG or ai >= AI_GENAI_FLAG
+    print(f"[AIFace] {session_id} ({reason}) deepfake={df:.3f} ai_generated={ai:.3f} -> {'FLAG' if flagged else 'ok'} "
+          f"(check {af['checks']}/{AI_FACE_MAX_PER_SESSION})")
+    if flagged:
+        af['flag'] = True
+        try:
+            from api.routes.ws_handlers import _get_telemetry
+            _get_telemetry(session_id)['ai_face_fake'] = True
+        except Exception:
+            pass
+        what = 'swapped / AI-modified' if df >= AI_DEEPFAKE_FLAG else 'AI-generated'
+        alert = _make_alert('AI_FACE_FAKE', 'HIGH', 'AI_FACE',
+                            f'AI face check: the face appears {what} (deepfake {df:.2f}, AI-generated {ai:.2f})',
+                            max(df, ai))
+    else:
+        alert = _make_alert('AI_FACE_OK', 'LOW', 'AI_FACE',
+                            f'AI face check passed (deepfake {df:.2f}, AI-generated {ai:.2f})', max(df, ai))
+    alert['type'] = 'ALERT'
+    try:
+        await publish_alert(session_id, alert)
+        await get_alerts_collection().insert_one({'session_id': session_id, **{k: v for k, v in alert.items() if k != 'type'}})
+    except Exception as e:
+        print(f"[AIFace] Could not publish alert: {e}")
 
 
 async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, thresholds: dict):
@@ -659,6 +761,8 @@ async def _handle_liveness_event(session_id: str, msg: dict, analyzers: dict, th
         return  # first miss — candidate gets one retry before anything is flagged
 
     analyzers['liveness_failed'] = failed
+    if failed:
+        _request_ai_face_check(analyzers, 'liveness_fail')
     try:
         from api.routes.ws_handlers import _get_telemetry
         _get_telemetry(session_id)['liveness_failed'] = failed
@@ -810,6 +914,7 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
         frame_pixels=int(analyzers.get('last_frame_pixels', 320 * 240)),
         rppg_good_frac=_rppg_good_frac(analyzers),
         pulse_mismatch=pulse_mismatch,
+        ai_face_fake=bool(analyzers.get('ai_face', {}).get('flag', False)),
     )
 
     now_iso = datetime.utcnow().isoformat()

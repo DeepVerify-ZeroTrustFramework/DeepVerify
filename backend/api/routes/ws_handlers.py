@@ -171,6 +171,7 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
         frame_pixels=telemetry.get("last_frame_pixels", 320 * 240),
         rppg_good_frac=(1.0 if telemetry.get("rppg_excused") else telemetry.get("rppg_good_frac")),
         pulse_mismatch=(False if telemetry.get("rppg_excused") else bool(telemetry.get("pulse_mismatch", False))),
+        ai_face_fake=bool(telemetry.get("ai_face_fake", False)),
     )
 
     # Filter out acknowledged alerts from list
@@ -670,6 +671,7 @@ async def ws_candidate(websocket: WebSocket, session_id: str):
                 frame_pixels=telemetry.get("last_frame_pixels", 320 * 240),
                 rppg_good_frac=(1.0 if telemetry.get("rppg_excused") else telemetry.get("rppg_good_frac")),
                 pulse_mismatch=(False if telemetry.get("rppg_excused") else bool(telemetry.get("pulse_mismatch", False))),
+                ai_face_fake=bool(telemetry.get("ai_face_fake", False)),
             )
 
             # Filter out acknowledged alerts so they do not continuously re-alert

@@ -46,6 +46,7 @@ def axiom_fusion_engine(
     frame_pixels: int = 76800,
     rppg_good_frac: Optional[float] = None,   # uploads: share of windows with a plausible, stable pulse
     pulse_mismatch: bool = False,             # face and neck never show the same heart rate
+    ai_face_fake: bool = False,               # external AI face check flagged a swapped / AI-generated face
 ) -> Dict:
     """
     Compute fused trust score from all 4 forensic modules.
@@ -307,10 +308,22 @@ def axiom_fusion_engine(
     # AUTHENTIC without positive evidence: if PRNU could not confirm a sensor
     # fingerprint, the score stays below the verified band.
     prnu_confirmed = prnu_match is not None and prnu_match >= 1.0
+    prnu_mismatch = prnu_match is not None and prnu_match <= 0.0 and prnu_state == 'mismatch'
+    # Uploaded file: there is no independent reference camera, only the file
+    # itself. Matching a file against its own pattern proves nothing: codec
+    # artefacts and AI-generated texture repeat across frames just like sensor
+    # noise (tested: Gemini videos self-match at PCE 800-5000, a real webcam file
+    # at 1800-2500). So PRNU is not applicable to uploads. Judge on rPPG alone,
+    # never above 79 (no identity check), and call it inconclusive rather than
+    # turning "no evidence" into "deepfake" or "authentic".
+    prnu_unmeasured = source == 'upload'
     if source == 'upload':
-        T = (prnu_score + (30.0 - rppg_penalty)) / 60.0 * 100.0
-        if not prnu_confirmed:
-            T = min(T, 79.0)
+        if prnu_unmeasured:
+            T = min((30.0 - rppg_penalty) / 30.0 * 100.0, 79.0)
+        else:
+            T = (prnu_score + (30.0 - rppg_penalty)) / 60.0 * 100.0
+            if not prnu_confirmed:
+                T = min(T, 79.0)
         jitter_penalty = 0.0
         behavioral_score_clamped = 1.0
 
@@ -323,10 +336,19 @@ def axiom_fusion_engine(
     # On its own a failed challenge costs 20 points (lands in "Caution", the
     # interviewer sees the alert). Only when another signal agrees (PRNU says a
     # different camera, or rPPG has lost the pulse) does it cap the score at 35.
+    # AI FACE CHECK (Sightengine snapshot): a swapped or AI-generated face costs 20
+    # points and counts as confirming evidence for a failed liveness challenge.
+    ai_face_penalty = 0.0
+    if ai_face_fake:
+        before = T
+        T = max(0.0, T - 20.0)
+        ai_face_penalty = round(before - T, 2)
+
     liveness_penalty = 0.0
     if liveness_failed:
         corroborated = ((prnu_match is not None and prnu_match <= 0.0) or
-                        (rppg_good_frac is not None and rppg_good_frac < 0.20))
+                        (rppg_good_frac is not None and rppg_good_frac < 0.20) or
+                        ai_face_fake)
         before = T
         T = min(T, 35.0) if corroborated else max(0.0, T - 20.0)
         liveness_penalty = round(before - T, 2)
@@ -346,7 +368,11 @@ def axiom_fusion_engine(
         'calibrated_prob': round(calibrated_prob, 4),
         'liveness_failed': bool(liveness_failed),
         'liveness_penalty': liveness_penalty,
-        'inconclusive': bool(source == 'upload' and not prnu_confirmed),
+        'ai_face_fake': bool(ai_face_fake),
+        'ai_face_penalty': ai_face_penalty,
+        # inconclusive = nothing measured as wrong, but no identity check either
+        'inconclusive': bool(prnu_unmeasured and T >= 60.0),
+        'prnu_measurable': not prnu_unmeasured,
     }
 
 

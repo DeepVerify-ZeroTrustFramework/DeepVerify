@@ -58,6 +58,8 @@ export interface CodeSyncState {
 
 export function useTrustScore(sessionId: string) {
   const [score, setScore] = useState(0)
+  // Demo uploads: true when the file has no measurable camera fingerprint
+  const [inconclusive, setInconclusive] = useState(false)
   const [breakdown, setBreakdown] = useState<TrustBreakdown>({
     prnu: 0, rppg: 0, jitter: 0, behavioral: 0
   })
@@ -94,6 +96,9 @@ export function useTrustScore(sessionId: string) {
         if (msg.type === 'TRUST_UPDATE' || msg.type === 'TRUST_SCORE_UPDATE') {
           if (typeof msg.trust_score === 'number' && !isNaN(msg.trust_score)) {
             setScore(msg.trust_score)
+          }
+          if (typeof msg.inconclusive === 'boolean') {
+            setInconclusive(msg.inconclusive)
           }
           if (msg.breakdown) {
             setBreakdown(prev => ({
@@ -205,6 +210,7 @@ export function useTrustScore(sessionId: string) {
 
   return {
     score,
+    inconclusive,
     breakdown,
     raw,
     alerts,

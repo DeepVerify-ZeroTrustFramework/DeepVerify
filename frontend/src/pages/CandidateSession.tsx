@@ -18,6 +18,7 @@ import ObjectDetector from '../components/ObjectDetector'
 import type { ProhibitedObject } from '../components/ObjectDetector'
 import { startRppgCropStream } from '../utils/rppgCrop'
 import { startFrameTiming } from '../utils/frameTiming'
+import { attachSnapshotResponder } from '../utils/snapshot'
 
 // ── Language templates ──
 const LANGUAGE_TEMPLATES: Record<string, { lang: string; template: string }> = {
@@ -123,6 +124,7 @@ export default function CandidateSession() {
   const frameIntervalRef = useRef<any>(null)
 
   // ── Active liveness challenge (issued + verified by the server on the frames socket) ──
+  const [livenessProgress, setLivenessProgress] = useState<null | { face: boolean; progress: number; wrongWay: boolean }>(null)
   const [livenessChallenge, setLivenessChallenge] = useState<null | {
     id: string; step: number; of: number; direction: 'LEFT' | 'RIGHT'
     instruction: string; timeoutMs: number; retry: boolean; key: number
@@ -309,7 +311,10 @@ export default function CandidateSession() {
             window.speechSynthesis.speak(new SpeechSynthesisUtterance(msg.instruction))
           }
         } catch { /* speech is optional */ }
+      } else if (msg.type === 'LIVENESS_PROGRESS') {
+        setLivenessProgress({ face: !!msg.face, progress: Number(msg.progress) || 0, wrongWay: !!msg.wrong_way })
       } else if (msg.type === 'LIVENESS_CHALLENGE_RESULT') {
+        setLivenessProgress(null)
         setLivenessChallenge(null)
         setLivenessResult({ passed: !!msg.passed, message: msg.message || '' })
         if (livenessResultTimerRef.current) clearTimeout(livenessResultTimerRef.current)
@@ -389,6 +394,8 @@ export default function CandidateSession() {
       startRppgCropStream(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
       // Jitter: the camera's own frame timing
       startFrameTiming(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
+      // AI face check: answer the server's occasional snapshot requests
+      attachSnapshotResponder(frameWs, () => selfVideoRef.current, () => camEnabledRef.current)
     }
 
     frameWs.onerror = (err) => {
@@ -914,6 +921,24 @@ export default function CandidateSession() {
               {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
             </div>
             <p className="text-[12px] text-gray-400 mb-3">Turn clearly, then face the screen again. Keep your face in view.</p>
+            {livenessProgress && (
+              <div className="mt-2 mb-1">
+                {livenessProgress.face ? (
+                  <>
+                    <div className="flex justify-between text-[11px] text-gray-300 mb-1">
+                      <span>{livenessProgress.wrongWay ? 'Other way - turn to the arrow side' : 'Turn detected'}</span>
+                      <span>{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div className={`h-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                        style={{ width: `${Math.min(100, livenessProgress.progress * 100)}%` }} />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[12px] font-semibold text-amber-300">Face not detected - keep your face in view and well lit</p>
+                )}
+              </div>
+            )}
             <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
               <div
                 key={livenessChallenge.key}
