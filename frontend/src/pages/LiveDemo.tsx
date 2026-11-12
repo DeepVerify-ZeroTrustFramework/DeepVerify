@@ -4,14 +4,14 @@
 // 2. Pick a source: any camera (incl. OBS Virtual Camera) or a video file played
 //    as the camera. Switch sources at any time while streaming.
 // 3. Stream: frames, PRNU crops, rPPG face crops and frame timing go to the same
-//    backend as a live interview; head-turn liveness challenges appear here.
+//    backend as a live interview. (Head-turn liveness checks are switched off.)
 //    The server judges every source against the enrolled webcam.
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ShieldCheck, Camera, Upload, Play, Square, ArrowLeft, ArrowRight,
-  CheckCircle2, XCircle, Loader2, Home,
+  ShieldCheck, Camera, Upload, Play, Square,
+  Loader2, Home,
 } from 'lucide-react'
 import TrustGauge from '../components/TrustGauge'
 import ModuleBreakdown from '../components/ModuleBreakdown'
@@ -35,9 +35,9 @@ export default function LiveDemo() {
   const [enrollPct, setEnrollPct] = useState(0)
   const [source, setSource] = useState<Source | null>(null)
   const [framesSent, setFramesSent] = useState(0)
-  const [challenge, setChallenge] = useState<Challenge | null>(null)
-  const [result, setResult] = useState<{ passed: boolean; message: string } | null>(null)
-  const [livenessProgress, setLivenessProgress] = useState<null | { face: boolean; progress: number; wrongWay: boolean }>(null)
+  const [, setChallenge] = useState<Challenge | null>(null)
+  const [, setResult] = useState<{ passed: boolean; message: string } | null>(null)
+  const [, setLivenessProgress] = useState<null | { face: boolean; progress: number; wrongWay: boolean }>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -351,40 +351,6 @@ export default function LiveDemo() {
                 LIVE - {framesSent} frames
               </div>
             )}
-            {challenge && (
-              <div key={challenge.key} className="absolute inset-x-0 bottom-0 bg-black/75 text-white px-5 py-4 flex items-center gap-4">
-                {challenge.direction === 'LEFT' && <ArrowLeft size={40} className="text-[#FF4D7E] animate-pulse shrink-0" />}
-                <div className="flex-1">
-                  <div className="text-[11px] uppercase tracking-wide text-white/60">Liveness check - step {challenge.step} of {challenge.of}</div>
-                  <div className="text-lg font-bold">{challenge.instruction}</div>
-                  {livenessProgress && (
-                    <div className="mt-2 mb-1">
-                      {livenessProgress.face ? (
-                        <>
-                          <div className="flex justify-between text-[11px] text-gray-300 mb-1">
-                            <span>{livenessProgress.wrongWay ? 'Other way - turn to the arrow side' : 'Turn detected'}</span>
-                            <span>{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
-                          </div>
-                          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                            <div className={`h-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                                    style={{ width: `${Math.min(100, livenessProgress.progress * 100)}%` }} />
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-[12px] font-semibold text-amber-300">Face not detected - keep your face in view and well lit</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {challenge.direction === 'RIGHT' && <ArrowRight size={40} className="text-[#FF4D7E] animate-pulse shrink-0" />}
-              </div>
-            )}
-            {result && (
-              <div className={`absolute inset-x-0 bottom-0 px-5 py-3 flex items-center gap-3 text-white ${result.passed ? 'bg-[#1A6B3C]/90' : 'bg-[#991B1B]/90'}`}>
-                {result.passed ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
-                <span className="text-sm font-semibold">{result.message}</span>
-              </div>
-            )}
           </div>
 
           {/* Quick start */}
@@ -457,12 +423,6 @@ export default function LiveDemo() {
               <div className="flex flex-wrap gap-2">
                 <button onClick={stopLive} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#EFEFF0] text-[#0F0F0F] text-sm font-semibold">
                   <Square size={15} /> Stop
-                </button>
-                <button
-                  onClick={() => wsRef.current?.readyState === WebSocket.OPEN && wsRef.current.send(JSON.stringify({ type: 'LIVENESS_REQUEST' }))}
-                  disabled={!source || !!challenge}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#A4123F] text-white text-sm font-semibold disabled:opacity-40">
-                  <ArrowLeft size={15} /> Run head-turn check now
                 </button>
               </div>
             )}

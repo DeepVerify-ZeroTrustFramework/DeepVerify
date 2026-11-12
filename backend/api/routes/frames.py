@@ -43,6 +43,9 @@ AI_GENAI_FLAG = 0.50                  # tested: real faces 0.001, AI-generated 0
 RPPG_CROP_FS = 15.0
 import os as _os
 FACE_NECK_SCORING = _os.getenv('DV_FACE_NECK_SCORING', '0') == '1'
+# Head-turn liveness on demo pages: OFF (it caused false failures). Interviews
+# have it off too. Set DV_DEMO_LIVENESS=1 to bring Naren's demo checks back.
+DEMO_LIVENESS = _os.getenv('DV_DEMO_LIVENESS', '0') == '1'
 
 # Active session analyzers (keyed by session_id)
 _session_analyzers: dict = {}
@@ -197,7 +200,7 @@ async def websocket_frames(websocket: WebSocket, session_id: str):
                     msg = json.loads(data['text'])
                     if msg.get('type') == 'LIVENESS_REQUEST' and analyzers.get('is_demo'):
                         # Live demo button: run a head-turn check now (original behaviour)
-                        if analyzers.get('liveness') is not None:
+                        if DEMO_LIVENESS and analyzers.get('liveness') is not None:
                             analyzers['liveness'].request_now()
                         continue
                     if msg.get('type') in ('LIVENESS_REQUEST', 'LIVENESS_START') and not analyzers.get('is_demo'):
@@ -335,34 +338,35 @@ async def _process_frame(session_id: str, frame_bytes: bytes, analyzers: dict,
     tab_away = (analyzers.get('tab_hidden', False) or
                 time.time() - analyzers.get('tab_visible_since', 0.0) < 2.0)
     # Demo pages: original behaviour (timed checks, cancelled while the tab is hidden).
-    if analyzers.get('is_demo') and websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
-        lm_ = analyzers['liveness']
-        if tab_away:
-            for m in lm_.cancel() if lm_.active else []:
+    if analyzers.get('is_demo'):
+        if DEMO_LIVENESS and websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
+            lm_ = analyzers['liveness']
+            if tab_away:
+                for m in lm_.cancel() if lm_.active else []:
+                    try:
+                        await websocket.send_json(m)
+                    except Exception:
+                        pass
+                liveness_msgs = []
+            else:
+                try:
+                    liveness_msgs = lm_.on_frame(frame)
+                except Exception as e:
+                    print(f"[Liveness] Error: {e}")
+                    liveness_msgs = []
+            for m in liveness_msgs:
+                # The challenge asks for head turns: keep the gaze module from flagging them.
+                try:
+                    from api.routes.ws_handlers import _get_telemetry
+                    quiet = 10.0 if m.get('type') == 'LIVENESS_CHALLENGE' else 4.0
+                    _get_telemetry(session_id)['_liveness_quiet_until'] = time.time() + quiet
+                except Exception:
+                    pass
                 try:
                     await websocket.send_json(m)
                 except Exception:
                     pass
-            liveness_msgs = []
-        else:
-            try:
-                liveness_msgs = lm_.on_frame(frame)
-            except Exception as e:
-                print(f"[Liveness] Error: {e}")
-                liveness_msgs = []
-        for m in liveness_msgs:
-            # The challenge asks for head turns: keep the gaze module from flagging them.
-            try:
-                from api.routes.ws_handlers import _get_telemetry
-                quiet = 10.0 if m.get('type') == 'LIVENESS_CHALLENGE' else 4.0
-                _get_telemetry(session_id)['_liveness_quiet_until'] = time.time() + quiet
-            except Exception:
-                pass
-            try:
-                await websocket.send_json(m)
-            except Exception:
-                pass
-            await _handle_liveness_event_demo(session_id, m, analyzers, thresholds)
+                await _handle_liveness_event_demo(session_id, m, analyzers, thresholds)
 
     elif websocket is not None and analyzers.get('liveness') is not None and source != 'upload':
         lm_ = analyzers['liveness']
@@ -488,7 +492,7 @@ async def _process_prnu_crop(session_id: str, packet: bytes, analyzers: dict, th
         await _publish_once(session_id, analyzers, _make_alert(
             'PRNU_FINGERPRINT_CHANGE', 'MEDIUM', 'PRNU',
             f'Live video no longer matches the camera fingerprint of {where} (PCE={decision["pce"]:.1f}, needs ≥60) '
-            + ('— running a liveness check' if analyzers.get('is_demo') else '— verifying identity'), float(decision['pce'])))
+            + ('— running a liveness check' if (analyzers.get('is_demo') and DEMO_LIVENESS) else '— verifying identity'), float(decision['pce'])))
         _request_liveness(analyzers)
     elif streak == 60:
         await _publish_once(session_id, analyzers, _make_alert(
@@ -720,7 +724,7 @@ def _request_liveness(analyzers: dict):
     """A passive check flagged something.
     Demo pages: challenge right away (original behaviour). Interviews: the
     interviewer starts checks (the alert text suggests it); just queue an AI face check."""
-    if analyzers.get('is_demo'):
+    if analyzers.get('is_demo') and DEMO_LIVENESS:
         lm = analyzers.get('liveness')
         if lm is not None and getattr(lm, 'enabled', False):
             lm.request_now()
@@ -755,6 +759,15 @@ async def _run_ai_face_check(session_id: str, jpeg: bytes, analyzers: dict):
         return
     df = float(r.get('deepfake') or 0.0); ai = float(r.get('ai_generated') or 0.0)
     flagged = df >= AI_DEEPFAKE_FLAG or ai >= AI_GENAI_FLAG
+    # Worst scores seen this session feed the rPPG component (see axiom.py):
+    # a later clean snapshot does not erase an earlier detected swap.
+    prev = af.get('scores') or (0.0, 0.0)
+    af['scores'] = (max(prev[0], df), max(prev[1], ai))
+    try:
+        from api.routes.ws_handlers import _get_telemetry
+        _get_telemetry(session_id)['ai_face_scores'] = af['scores']
+    except Exception:
+        pass
     print(f"[AIFace] {session_id} ({reason}) deepfake={df:.3f} ai_generated={ai:.3f} -> {'FLAG' if flagged else 'ok'} "
           f"(check {af['checks']}/{AI_FACE_MAX_PER_SESSION})")
     if flagged:
@@ -1091,6 +1104,7 @@ async def _run_fusion(session_id: str, analyzers: dict, thresholds: dict):
         rppg_good_frac=_rppg_good_frac(analyzers),
         pulse_mismatch=pulse_mismatch,
         ai_face_fake=bool(analyzers.get('ai_face', {}).get('flag', False)),
+        ai_face_scores=(analyzers.get('ai_face') or {}).get('scores'),
     )
 
     now_iso = datetime.utcnow().isoformat()

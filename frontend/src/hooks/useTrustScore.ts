@@ -25,6 +25,8 @@ export interface TrustBreakdown {
   rppg: number
   jitter: number
   behavioral: number
+  // Worst Sightengine fake score this session (0-1); null/undefined = no check yet
+  ai_face?: number | null
 }
 
 export interface RawTelemetry {
@@ -146,6 +148,7 @@ export function useTrustScore(sessionId: string, options?: { reconnect?: boolean
               rppg: typeof msg.breakdown.rppg === 'number' ? msg.breakdown.rppg : prev.rppg,
               jitter: typeof msg.breakdown.jitter === 'number' ? msg.breakdown.jitter : prev.jitter,
               behavioral: typeof msg.breakdown.behavioral === 'number' ? msg.breakdown.behavioral : prev.behavioral,
+              ai_face: typeof msg.breakdown.ai_face === 'number' ? msg.breakdown.ai_face : prev.ai_face,
             }))
           }
           if (msg.raw) {

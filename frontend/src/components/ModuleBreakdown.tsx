@@ -50,7 +50,18 @@ export default function ModuleBreakdown({ breakdown, uploadMode = false, prnuNA 
             </div>
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
-                <span className="text-[12px] font-semibold text-[#3A3A3A]">{m.label}</span>
+                <span className="text-[12px] font-semibold text-[#3A3A3A]">
+                  {m.label}
+                  {/* rPPG points include the AI face check (Sightengine): show its score */}
+                  {m.key === 'rppg' && typeof breakdown?.ai_face === 'number' && (
+                    <span
+                      className={`ml-2 text-[10px] font-mono font-normal ${breakdown.ai_face >= 0.3 ? 'text-[#991B1B]' : 'text-[#6B6B6B]'}`}
+                      title="AI face check (Sightengine): 0 = looks real, 1 = swapped / AI-generated"
+                    >
+                      · AI face {breakdown.ai_face.toFixed(2)}
+                    </span>
+                  )}
+                </span>
                 <span className="text-[11px] font-mono text-[#6B6B6B]">
                   {val.toFixed(1)} <span className="text-[9px]">/ {m.max}</span>
                 </span>

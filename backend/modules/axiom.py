@@ -27,6 +27,11 @@ import uuid
 from datetime import datetime
 
 
+# AI face check (Sightengine) -> rPPG factor. From the team's test: real faces
+# scored <= 0.12, face swaps 0.32-0.90, AI-generated 0.87-0.99.
+AI_DEEPFAKE_START, AI_DEEPFAKE_ZERO = 0.30, 0.80
+AI_GENAI_START, AI_GENAI_ZERO = 0.50, 0.90
+
 def axiom_fusion_engine(
     pce: float,
     snr_rppg: float,
@@ -47,6 +52,7 @@ def axiom_fusion_engine(
     rppg_good_frac: Optional[float] = None,   # uploads: share of windows with a plausible, stable pulse
     pulse_mismatch: bool = False,             # face and neck never show the same heart rate
     ai_face_fake: bool = False,               # external AI face check flagged a swapped / AI-generated face
+    ai_face_scores: Optional[tuple] = None,   # Sightengine (deepfake, ai_generated), worst seen this session; None = no check yet
 ) -> Dict:
     """
     Compute fused trust score from all 4 forensic modules.
@@ -255,6 +261,35 @@ def axiom_fusion_engine(
             'message': msg, 'description': msg,
         })
 
+    # AI FACE CHECK folded into rPPG. rPPG's blind spot: a face-swap inherits the
+    # real pulse of the person driving it, so it scores full rPPG points. The
+    # Sightengine snapshot looks at the face itself. Weakest link, not an average:
+    # an average would let a strong (inherited) pulse hide a detected swap.
+    # Each model on its own scale, starting at its alert threshold:
+    #   deepfake      <= 0.30 no change, 0.30..0.80 scales down, >= 0.80 -> 0
+    #   ai_generated  <= 0.50 no change, 0.50..0.90 scales down, >= 0.90 -> 0
+    # The lower of the two factors applies. No check yet / budget used up /
+    # keys missing (None) -> rPPG unchanged.
+    ai_face_factor = 1.0
+    if ai_face_scores is not None:
+        for score, start, zero in ((ai_face_scores[0], AI_DEEPFAKE_START, AI_DEEPFAKE_ZERO),
+                                   (ai_face_scores[1], AI_GENAI_START, AI_GENAI_ZERO)):
+            if score is None:
+                continue
+            v = max(0.0, min(1.0, float(score)))
+            if v > start:
+                ai_face_factor = min(ai_face_factor, max(0.0, 1.0 - (v - start) / (zero - start)))
+    rppg_points_before_ai = 30.0 - rppg_penalty
+    if ai_face_factor < 1.0:
+        extra = rppg_points_before_ai - rppg_points_before_ai * ai_face_factor
+        T -= extra
+        rppg_penalty += extra
+    # Two independent signals agree (rPPG already lost the pulse AND the AI check
+    # flags the face): keep the old extra -20, so this case is never milder than
+    # before the AI score was folded into rPPG.
+    ai_corroborated_penalty = bool(ai_face_fake and ai_face_scores is not None
+                                   and rppg_points_before_ai < 15.0)
+
     # --- Jitter Component (15 points max) ---
     jitter_penalty = 0.0
     if cv_jitter > gamma:
@@ -339,7 +374,9 @@ def axiom_fusion_engine(
     # AI FACE CHECK (Sightengine snapshot): a swapped or AI-generated face costs 20
     # points and counts as confirming evidence for a failed liveness challenge.
     ai_face_penalty = 0.0
-    if ai_face_fake:
+    # The separate -20 only applies when no score was passed (older callers);
+    # with a score, the effect is already in the rPPG points above.
+    if ai_face_fake and (ai_face_scores is None or ai_corroborated_penalty):
         before = T
         T = max(0.0, T - 20.0)
         ai_face_penalty = round(before - T, 2)
@@ -359,6 +396,9 @@ def axiom_fusion_engine(
         'rppg': round(max(0.0, min(30.0, 30.0 - rppg_penalty)), 2),
         'jitter': round(max(0.0, min(15.0, 15.0 - jitter_penalty)), 2),
         'behavioral': round(max(0.0, min(25.0, 25.0 * behavioral_score_clamped)), 2),
+        # shown next to rPPG on the dashboard (None until the first AI face check)
+        'ai_face': (None if ai_face_scores is None else
+                    round(max(float(x or 0.0) for x in ai_face_scores), 3)),
     }
 
     return {
@@ -370,6 +410,8 @@ def axiom_fusion_engine(
         'liveness_penalty': liveness_penalty,
         'ai_face_fake': bool(ai_face_fake),
         'ai_face_penalty': ai_face_penalty,
+        'ai_face_scores': ai_face_scores,
+        'ai_face_factor': round(ai_face_factor, 3),
         # inconclusive = nothing measured as wrong, but no identity check either
         'inconclusive': bool(prnu_unmeasured and T >= 60.0),
         'prnu_measurable': not prnu_unmeasured,
