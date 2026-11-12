@@ -39,14 +39,16 @@ export default function SystemCheck() {
   }, [token, navigate])
 
   if (loading) {
-    return <div className="min-h-screen bg-white flex items-center justify-center"><Loader2 className="animate-spin text-[#A4123F]" /></div>
+    return <div className="min-h-screen flex items-center justify-center"><div className="glass-tile !w-16 !h-16 !rounded-[20px]"><Loader2 className="animate-spin text-[#A4123F]" /></div></div>
   }
   
   if (error || !session) {
-    return <div className="min-h-screen bg-white flex flex-col items-center justify-center text-center p-6">
-      <AlertCircle className="text-[#991B1B] w-12 h-12 mb-4" />
-      <h1 className="text-xl font-bold text-[#0F0F0F] mb-2">Access Denied</h1>
-      <p className="text-[#6B6B6B]">{error}</p>
+    return <div className="min-h-screen flex flex-col items-center justify-center text-center p-6">
+      <div className="glass-strong liquid rounded-[32px] px-12 py-12 flex flex-col items-center max-w-md w-full">
+      <div className="glass-tile !w-16 !h-16 !rounded-[20px] mb-5"><AlertCircle className="text-[#991B1B] w-8 h-8" /></div>
+      <h1 className="text-[22px] font-bold text-[#141114] tracking-[-0.02em] mb-2">Access Denied</h1>
+      <p className="text-[15px] text-[#67636C]">{error}</p>
+      </div>
     </div>
   }
 
@@ -216,20 +218,24 @@ function SystemCheckWizard({ session }: { session: any }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F7F8] flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Top bar */}
-      <div className="h-16 bg-white border-b border-[#E4E4E6] flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-[#A4123F] flex items-center justify-center">
-            <ShieldCheck size={18} className="text-white" />
+      <div className="shrink-0 max-w-[1320px] w-full mx-auto px-4 sm:px-6 pt-5">
+        <div className="min-h-[4.25rem] rounded-[24px] glass liquid flex flex-wrap items-center justify-between gap-3 pl-3 pr-3 py-2">
+        <div className="flex items-center gap-3">
+          <div className="glass-tile-maroon !w-11 !h-11 !rounded-[13px]">
+            <ShieldCheck size={20} className="text-white" />
           </div>
-          <span className="text-sm font-bold text-[#0F0F0F]">System Check</span>
+          <div>
+            <span className="block text-[16px] font-bold text-[#141114] tracking-[-0.015em] leading-tight">System Check</span>
+            <span className="block text-[10.5px] font-semibold text-[#85818A] uppercase tracking-[0.12em] mt-0.5">Device enrolment before your interview</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Speaking indicator */}
           {isSpeaking && (
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F5] border border-[#F5C2CD] text-[12px] font-semibold text-[#A4123F] animate-fade-in">
+            <div className="glass-chip !px-3 !py-1.5 !text-[12px] text-[#A4123F] animate-fade-in">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#A4123F] opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-[#A4123F]"></span>
@@ -242,10 +248,10 @@ function SystemCheckWizard({ session }: { session: any }) {
           <button
             onClick={toggleMute}
             title={isMuted ? "Unmute voice narration" : "Mute voice narration"}
-            className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 text-xs font-medium ${
-              isMuted 
-                ? 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200' 
-                : 'bg-white text-[#A4123F] border-[#E4E4E6] hover:bg-[#FDF2F5]'
+            className={`glass-btn !rounded-full px-3.5 py-2 text-[13px] ${
+              isMuted
+                ? '!text-[#85818A]'
+                : '!text-[#A4123F]'
             }`}
           >
             {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -253,65 +259,87 @@ function SystemCheckWizard({ session }: { session: any }) {
           </button>
 
 
-          <div className="text-[13px] font-medium text-[#6B6B6B] border-l border-[#E4E4E6] pl-4">
+          <div className="text-[13px] font-medium text-[#55515A] pl-3 pr-2 py-2 rounded-full bg-white/40 border border-white/80">
             Candidate: {session.candidate_name}
           </div>
         </div>
+        </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-[600px] bg-white rounded-2xl shadow-sm border border-[#E4E4E6] overflow-hidden">
-          
-          {/* Progress header */}
-          <div className="px-8 py-6 border-b border-[#E4E4E6] bg-[#FDF2F5]">
-            <div className="flex justify-between items-center mb-4">
+      <div className="flex-1 w-full max-w-[1320px] mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6 items-start">
+
+        {/* Steps rail (display only) */}
+        <aside className="hidden lg:flex flex-col gap-5 sticky top-6">
+          <div className="glass liquid rounded-[28px] p-5">
+            <div className="glass-label !text-[11px] px-2 mb-3">Setup progress</div>
+            <ol className="flex flex-col gap-1">
               {steps.map(s => (
-                <div key={s.n} className="flex flex-col items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full transition-colors ${currentStep >= s.n ? 'bg-[#A4123F]' : 'bg-[#EDD0D8]'}`} />
+                <li key={s.n} className={`flex items-center gap-3 px-2.5 py-2 rounded-[14px] transition-colors ${currentStep === s.n ? 'bg-white/80 shadow-[inset_0_1px_0_#fff,0_6px_16px_-10px_rgba(20,14,18,0.35)]' : ''}`}>
+                  <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0 transition-colors ${currentStep > s.n ? 'bg-[#1A6B3C] text-white' : currentStep === s.n ? 'bg-gradient-to-b from-[#B01848] to-[#7A0D2E] text-white shadow-[0_6px_14px_-6px_rgba(164,18,63,0.8)]' : 'bg-white/60 border border-[rgba(20,17,20,0.10)] text-[#85818A]'}`}>
+                    {currentStep > s.n ? <CheckCircle2 size={14} /> : s.n}
+                  </span>
+                  <span className={`text-[13.5px] font-semibold ${currentStep === s.n ? 'text-[#141114]' : currentStep > s.n ? 'text-[#4A464E]' : 'text-[#9A979E]'}`}>{s.label}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div className="glass-soft rounded-[22px] px-5 py-4 text-[12.5px] text-[#67636C] leading-relaxed">
+            Stay in good light and keep your camera still. Each step takes a few seconds.
+          </div>
+        </aside>
+
+        <div className="w-full glass-strong liquid rounded-[32px] overflow-hidden">
+
+          {/* Progress header */}
+          <div className="px-8 sm:px-10 pt-8 pb-6 border-b border-[rgba(20,17,20,0.06)]">
+            <div className="flex justify-between items-center gap-1.5 mb-4">
+              {steps.map(s => (
+                <div key={s.n} className="flex-1 flex flex-col items-center gap-2">
+                  <div className={`w-full h-1.5 rounded-full transition-colors duration-500 ${currentStep >= s.n ? 'bg-gradient-to-r from-[#B01848] to-[#7A0D2E]' : 'bg-[rgba(20,17,20,0.08)]'}`} />
                 </div>
               ))}
             </div>
-            <div className="flex justify-between text-[11px] font-semibold text-[#A4123F] uppercase tracking-wider">
+            <div className="flex justify-between text-[11px] font-semibold text-[#A4123F] uppercase tracking-[0.14em]">
               <span>Step {currentStep} of {steps.length}</span>
-              <span>{steps[currentStep - 1]?.label || ''}</span>
+              <span className="text-[#55515A]">{steps[currentStep - 1]?.label || ''}</span>
             </div>
           </div>
 
-          <div className="p-8 min-h-[340px] flex flex-col">
-            
+          <div className="p-8 sm:p-10 min-h-[460px] flex flex-col">
+
             {/* Step 1: Permissions */}
             {currentStep === 1 && (
               <div className="flex-1 animate-fade-in flex flex-col">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#F9ECF0] flex items-center justify-center">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="glass-tile !w-14 !h-14 !rounded-[18px]">
                     <Camera className="text-[#A4123F]" />
                   </div>
                   {stream && !virtualError && !hardwareError && (
-                    <span className="px-3 py-1 rounded-full bg-emerald-50 text-[#137333] text-xs font-semibold flex items-center gap-1.5 border border-[#B7E1CD]">
+                    <span className="glass-chip !px-3 !py-1.5 !text-[12px] text-[#137333]">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                       Hardware Ready
                     </span>
                   )}
                 </div>
 
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-2">Camera & Hardware Access</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-5 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-2">Camera & Hardware Access</h2>
+                <p className="text-[15px] text-[#67636C] mb-6 leading-relaxed max-w-[640px]">
                   DeepVerify requires raw access to your physical camera to generate cryptographic hardware fingerprints. Virtual cameras (OBS, Snap Camera, etc.) are strictly prohibited.
                 </p>
 
                 {/* 1. Hardware Access & Permissions Troubleshooting Card */}
                 {hardwareError && (
-                  <div className="p-4 mb-5 rounded-xl bg-[#FFF5F5] border border-[#FED7D7] text-[#9B2C2C] text-[13px] flex flex-col gap-3 shadow-sm">
-                    <div className="flex gap-2.5 items-start">
+                  <div className="p-5 mb-6 rounded-[20px] bg-[rgba(255,245,245,0.8)] border border-[#FED7D7] text-[#9B2C2C] text-[13.5px] flex flex-col gap-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                    <div className="flex gap-3 items-start">
                       <AlertTriangle size={18} className="shrink-0 text-amber-600 mt-0.5" />
                       <div className="flex-1">
-                        <strong className="text-[#9B2C2C] block font-bold text-[14px] mb-1">
+                        <strong className="text-[#9B2C2C] block font-bold text-[14.5px] mb-1">
                           {hardwareError.title}
                         </strong>
                         <p className="text-[#742A2A] leading-relaxed mb-3">
                           {hardwareError.message}
                         </p>
-                        <div className="p-3 bg-white/90 rounded-lg border border-[#FEB2B2] text-[12px] text-[#4A5568]">
+                        <div className="p-3.5 bg-white/85 rounded-[14px] border border-[#FEB2B2]/70 text-[12.5px] text-[#4A5568]">
                           <strong className="block text-[#2D3748] mb-1 font-semibold">Troubleshooting Steps:</strong>
                           <div className="whitespace-pre-line leading-relaxed font-sans">
                             {hardwareError.suggestion}
@@ -320,8 +348,8 @@ function SystemCheckWizard({ session }: { session: any }) {
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-[#FEB2B2]/60 flex items-center justify-between">
-                      <span className="text-[11px] text-[#742A2A] font-medium">
+                    <div className="pt-3 border-t border-[#FEB2B2]/60 flex items-center justify-between gap-3">
+                      <span className="text-[11.5px] text-[#742A2A] font-medium">
                         Status: Hardware release / permission required
                       </span>
                       <button
@@ -331,7 +359,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                           await actions.requestPermissions()
                           setStepLoading(false)
                         }}
-                        className="px-3 py-1.5 bg-[#9B2C2C] text-white hover:bg-[#742A2A] rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                        className="px-4 py-2 bg-[#9B2C2C] text-white hover:bg-[#742A2A] rounded-full text-[12px] font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw size={12} className={stepLoading ? 'animate-spin' : ''} />
                         Retry Access
@@ -342,9 +370,9 @@ function SystemCheckWizard({ session }: { session: any }) {
 
                 {/* 2. Genuine Virtual Camera Security Block */}
                 {virtualError && (
-                  <div className="p-4 mb-5 rounded-xl bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-[13px] flex flex-col gap-3">
-                    <div className="flex gap-2 items-start">
-                      <AlertCircle size={16} className="shrink-0 mt-0.5" /> 
+                  <div className="p-5 mb-6 rounded-[20px] bg-[rgba(254,226,226,0.8)] border border-[#FCA5A5] text-[#991B1B] text-[13.5px] flex flex-col gap-3">
+                    <div className="flex gap-2.5 items-start">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" />
                       <div>
                         <strong>Security Block:</strong> {virtualError}
                       </div>
@@ -354,8 +382,8 @@ function SystemCheckWizard({ session }: { session: any }) {
 
                 {/* 4. Live Stream Hardware Preview & Verification */}
                 {stream && !virtualError && !hardwareError && (
-                  <div className="mb-5 animate-fade-in">
-                    <div className="w-full aspect-video rounded-xl overflow-hidden bg-[#0A0A0A] relative shadow-inner border border-[#E4E4E6] mb-3">
+                  <div className="mb-6 animate-fade-in">
+                    <div className="w-full aspect-video rounded-[22px] overflow-hidden bg-[#0E0C10] relative mb-3 shadow-[0_0_0_6px_rgba(255,255,255,0.6),0_0_0_7px_rgba(255,255,255,0.95),0_24px_50px_-24px_rgba(20,14,18,0.55)]">
                       <video
                         autoPlay
                         playsInline
@@ -365,33 +393,33 @@ function SystemCheckWizard({ session }: { session: any }) {
                         }}
                         className="w-full h-full object-cover scale-x-[-1]"
                       />
-                      <div className="absolute top-2.5 left-2.5 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+                      <div className="absolute top-3 left-3 bg-black/55 text-white text-[11.5px] px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium border border-white/15">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                         <span>Live Physical Camera Feed</span>
                       </div>
                       {hasAudio && (
-                        <div className="absolute top-2.5 right-2.5 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+                        <div className="absolute top-3 right-3 bg-black/55 text-white text-[11.5px] px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium border border-white/15">
                           <Volume2 size={12} className="text-emerald-400" />
                           <span>Mic Active</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="p-3 rounded-xl bg-[#E6F4ED] border border-[#B7E1CD] text-[#137333] text-[12px] flex items-center justify-between">
+                    <div className="mt-4 px-4 py-3 rounded-[16px] bg-[rgba(230,244,237,0.75)] border border-[#B7E1CD] text-[#137333] text-[12.5px] flex items-center justify-between">
                       <div className="flex items-center gap-2 truncate">
                         <CheckCircle2 size={16} className="shrink-0 text-[#137333]" />
                         <span className="font-semibold shrink-0">Authentic Hardware Verified:</span>
-                        <span className="font-mono text-[11px] truncate">{deviceName}</span>
+                        <span className="font-mono text-[11.5px] truncate">{deviceName}</span>
                       </div>
                     </div>
 
                     {availableCameras.length > 1 && (
-                      <div className="mt-2.5 flex items-center justify-between text-xs text-[#6B6B6B] px-1">
+                      <div className="mt-3 flex items-center justify-between gap-3 text-[13px] text-[#67636C] px-1">
                         <span>Select Camera Device:</span>
                         <select
                           value={selectedCameraId}
                           onChange={(e) => actions.switchCamera(e.target.value)}
-                          className="px-2.5 py-1 bg-white border border-[#E4E4E6] rounded-lg text-xs font-medium text-[#0F0F0F] outline-none hover:border-[#A4123F] transition-colors"
+                          className="glass-input !w-auto !py-2 !px-3.5 !text-[13px] !rounded-full font-medium"
                         >
                           {availableCameras.map(cam => (
                             <option key={cam.deviceId} value={cam.deviceId}>
@@ -405,7 +433,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                 )}
 
                 {typeof window !== 'undefined' && Boolean((window.screen as any)?.isExtended) && (
-                  <div className="p-3 mb-5 rounded-lg bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2">
+                  <div className="px-4 py-3 mb-6 rounded-[16px] bg-[rgba(254,243,199,0.8)] border border-[#FDE68A] text-[#92400E] text-[13px] flex gap-2">
                     <Monitor size={16} className="shrink-0 mt-0.5" />
                     <span><strong>Advisory:</strong> Multiple monitors detected. Please disconnect secondary displays for an optimal integrity score.</span>
                   </div>
@@ -415,7 +443,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                   <button
                     onClick={handleStep}
                     disabled={stepLoading}
-                    className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2 cursor-pointer shadow-sm"
+                    className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px] cursor-pointer"
                   >
                     {stepLoading ? (
                       <Loader2 size={16} className="animate-spin" />
@@ -433,29 +461,29 @@ function SystemCheckWizard({ session }: { session: any }) {
 
             {/* Step 2: Network */}
             {currentStep === 2 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center mb-6">
-                  <Wifi className="text-blue-600" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <Wifi className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">Network Profiling</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">Network Profiling</h2>
+                <p className="text-[15px] text-[#67636C] mb-7 leading-relaxed max-w-[640px]">
                   Measuring your STUN/TURN latencies and establishing a connection baseline. This detects routing anomalies used by rendering proxies.
                 </p>
-                
+
                 {/* Result box (appears as measuring) */}
-                <div className="bg-[#F7F7F8] rounded-xl p-4 mb-6">
-                  <div className="flex justify-between items-center text-[13px] mb-2">
-                    <span className="text-[#6B6B6B]">Round Trip Time (RTT)</span>
-                    <span className="font-semibold text-[#0F0F0F]">{rtt !== null ? `${rtt} ms` : 'Measuring...'}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-7">
+                  <div className="glass-soft rounded-[20px] px-5 py-4">
+                    <span className="block glass-label !text-[10.5px] mb-1.5">Round Trip Time (RTT)</span>
+                    <span className="block text-[22px] font-mono font-semibold text-[#141114]">{rtt !== null ? `${rtt} ms` : 'Measuring...'}</span>
                   </div>
-                  <div className="flex justify-between items-center text-[13px]">
-                    <span className="text-[#6B6B6B]">Classification</span>
-                    <span className="font-semibold text-[#0F0F0F] capitalize">{connType || 'Measuring...'}</span>
+                  <div className="glass-soft rounded-[20px] px-5 py-4">
+                    <span className="block glass-label !text-[10.5px] mb-1.5">Classification</span>
+                    <span className="block text-[22px] font-semibold text-[#141114] capitalize">{connType || 'Measuring...'}</span>
                   </div>
                 </div>
 
                 <div className="mt-auto">
-                  <button onClick={handleStep} disabled={stepLoading} className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
+                  <button onClick={handleStep} disabled={stepLoading} className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]">
                     {stepLoading ? <Loader2 size={16} className="animate-spin" /> : 'Run Diagnostics'}
                   </button>
                 </div>
@@ -464,27 +492,27 @@ function SystemCheckWizard({ session }: { session: any }) {
 
             {/* Step 3: PRNU */}
             {currentStep === 3 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center mb-6">
-                  <Cpu className="text-amber-600" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <Cpu className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">PRNU Hardware Calibration</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">PRNU Hardware Calibration</h2>
+                <p className="text-[15px] text-[#67636C] mb-7 leading-relaxed max-w-[640px]">
                   Extracting the unique sensor noise pattern (K̂) from your camera. Please keep the camera completely still for 3 seconds.
                 </p>
-                
-                <div className="mb-6">
-                  <div className="flex justify-between text-[11px] mb-1">
-                    <span className="text-[#6B6B6B]">I-frames captured</span>
-                    <span className="font-medium text-[#0F0F0F]">{prnuFrames} / 90</span>
+
+                <div className="mb-7 glass-soft rounded-[20px] px-5 py-5">
+                  <div className="flex justify-between text-[12px] mb-2.5">
+                    <span className="glass-label !text-[10.5px]">I-frames captured</span>
+                    <span className="font-mono font-semibold text-[#141114]">{prnuFrames} / 90</span>
                   </div>
-                  <div className="h-2 rounded-full bg-[#EFEFF0] overflow-hidden">
-                    <div className="h-full bg-amber-500 transition-all duration-100" style={{ width: `${(prnuFrames/90)*100}%` }} />
+                  <div className="h-2.5 rounded-full bg-[rgba(20,17,20,0.08)] overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#B01848] to-[#7A0D2E] rounded-full transition-all duration-100" style={{ width: `${(prnuFrames/90)*100}%` }} />
                   </div>
                 </div>
 
                 <div className="mt-auto">
-                  <button onClick={handleStep} disabled={stepLoading} className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
+                  <button onClick={handleStep} disabled={stepLoading} className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]">
                     {stepLoading ? 'Calibrating...' : 'Start Calibration'}
                   </button>
                 </div>
@@ -493,26 +521,26 @@ function SystemCheckWizard({ session }: { session: any }) {
 
             {/* Step 4: rPPG */}
             {currentStep === 4 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center mb-6">
-                  <HeartPulse className="text-red-500" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <HeartPulse className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">rPPG Liveness Baseline</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">rPPG Liveness Baseline</h2>
+                <p className="text-[15px] text-[#67636C] mb-7 leading-relaxed max-w-[640px]">
                   Extracting micro-color variations from your face to establish a biological pulse baseline. Look directly at the camera.
                 </p>
-                
-                <div className="flex justify-center mb-6">
-                  <div className="text-center p-4 rounded-xl border border-red-100 bg-red-50/50 min-w-[120px]">
-                    <span className="block text-[11px] text-red-600/70 font-semibold uppercase tracking-wider mb-1">Heart Rate</span>
-                    <span className={`text-3xl font-bold text-red-600 font-mono ${stepLoading ? 'animate-heartbeat' : ''}`}>
-                      {rppgBpm || '--'} <span className="text-sm">BPM</span>
+
+                <div className="flex justify-center mb-7">
+                  <div className="text-center px-10 py-6 rounded-[24px] glass-soft min-w-[200px]">
+                    <span className="block glass-label !text-[10.5px] !text-[#A4123F] mb-2">Heart Rate</span>
+                    <span className={`inline-block text-[44px] leading-none font-bold text-[#A4123F] font-mono ${stepLoading ? 'animate-heartbeat' : ''}`}>
+                      {rppgBpm || '--'} <span className="text-[15px] text-[#85818A]">BPM</span>
                     </span>
                   </div>
                 </div>
 
                 <div className="mt-auto">
-                  <button onClick={handleStep} disabled={stepLoading} className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
+                  <button onClick={handleStep} disabled={stepLoading} className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]">
                     {stepLoading ? 'Capturing baseline...' : 'Start Capture'}
                   </button>
                 </div>
@@ -521,23 +549,23 @@ function SystemCheckWizard({ session }: { session: any }) {
 
             {/* Step 5: Gaze */}
             {currentStep === 5 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center mb-6">
-                  <Eye className="text-green-600" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <Eye className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">Behavioral & Gaze Setup</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">Behavioral & Gaze Setup</h2>
+                <p className="text-[15px] text-[#67636C] mb-7 leading-relaxed max-w-[640px]">
                   Mapping your screen bounding box and natural head pose. Look at the corners of your screen.
                 </p>
-                
+
                 {gazeLambda && (
-                  <div className="p-3 mb-6 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-[13px] text-green-800">
+                  <div className="px-4 py-3 mb-7 bg-[rgba(230,244,237,0.75)] border border-[#B7E1CD] rounded-[16px] flex items-center gap-2 text-[13.5px] text-[#137333]">
                     <CheckCircle2 size={16} /> Gaze lambda threshold set to {gazeLambda}
                   </div>
                 )}
 
                 <div className="mt-auto">
-                  <button onClick={handleStep} disabled={stepLoading} className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
+                  <button onClick={handleStep} disabled={stepLoading} className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]">
                     {stepLoading ? <Loader2 size={16} className="animate-spin" /> : 'Calibrate Screen'}
                   </button>
                 </div>
@@ -547,16 +575,16 @@ function SystemCheckWizard({ session }: { session: any }) {
             {/* Step 6: Identity Photograph Upload */}
             {currentStep === 6 && (
               <div className="flex-1 animate-fade-in flex flex-col">
-                <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center mb-6">
-                  <UserCheck className="text-purple-600" />
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <UserCheck className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-2">Identity Photograph Upload</h2>
-                <p className="text-[13px] text-[#6B6B6B] mb-5 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-2">Identity Photograph Upload</h2>
+                <p className="text-[14.5px] text-[#67636C] mb-6 leading-relaxed max-w-[640px]">
                   Upload a clear passport-size or identity-style photograph. This will be securely stored and used as the reference image to verify your identity during the live interview via AWS Rekognition.
                 </p>
 
-                <input 
-                  type="file" 
+                <input
+                  type="file"
                   ref={fileInputRef}
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
@@ -576,41 +604,41 @@ function SystemCheckWizard({ session }: { session: any }) {
 
                 {/* Upload or Preview Box */}
                 {!localPhotoPreview && !referencePhotoUrl ? (
-                  <div 
+                  <div
                     onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed border-[#D0D0D5] hover:border-[#A4123F] rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors bg-[#FAFAFB] hover:bg-[#FDF2F5] mb-5 group"
+                    className="border-2 border-dashed border-[rgba(164,18,63,0.25)] hover:border-[#A4123F]/60 rounded-[24px] px-6 py-9 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/40 hover:bg-white/65 mb-6 group"
                   >
-                    <div className="w-12 h-12 rounded-full bg-white border border-[#E4E4E6] flex items-center justify-center mb-3 shadow-sm group-hover:scale-105 transition-transform">
+                    <div className="glass-tile !w-14 !h-14 !rounded-full mb-3 group-hover:scale-105 transition-transform">
                       <UploadCloud className="text-[#A4123F]" size={22} />
                     </div>
-                    <p className="text-[14px] font-bold text-[#0F0F0F] mb-1">Click to upload reference photo</p>
-                    <p className="text-[11px] text-[#6B6B6B]">JPG, PNG or WEBP · Max 5MB · Single person portrait</p>
+                    <p className="text-[15px] font-bold text-[#141114] mb-1">Click to upload reference photo</p>
+                    <p className="text-[12px] text-[#85818A]">JPG, PNG or WEBP · Max 5MB · Single person portrait</p>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-4 p-4 rounded-2xl border border-[#E4E4E6] bg-[#FAFAFB] mb-5">
-                    <img 
-                      src={localPhotoPreview || referencePhotoUrl || ''} 
-                      alt="Candidate Reference" 
-                      className="w-20 h-24 object-cover rounded-xl border border-white shadow-sm"
+                  <div className="flex items-center gap-5 p-5 rounded-[24px] glass-soft mb-6">
+                    <img
+                      src={localPhotoPreview || referencePhotoUrl || ''}
+                      alt="Candidate Reference"
+                      className="w-24 h-28 object-cover rounded-[16px] border-2 border-white shadow-[0_10px_24px_-12px_rgba(20,14,18,0.5)]"
                     />
                     <div className="flex-1">
-                      <p className="text-[13px] font-bold text-[#0F0F0F] mb-1">
+                      <p className="text-[14px] font-bold text-[#141114] mb-1.5">
                         {referencePhotoUrl && !localPhotoPreview
                           ? '✓ Verified Candidate Profile Photo'
                           : 'Uploaded Reference Portrait'}
                       </p>
                       {photoUploading && (
-                        <div className="flex items-center gap-1.5 text-xs text-purple-600 font-medium">
+                        <div className="flex items-center gap-1.5 text-[12.5px] text-[#A4123F] font-medium">
                           <Loader2 size={13} className="animate-spin" /> Validating face with AWS Rekognition...
                         </div>
                       )}
                       {isPhotoValidated && (
-                        <div className="flex items-center gap-1.5 text-xs text-[#1A6B3C] font-semibold">
+                        <div className="flex items-center gap-1.5 text-[12.5px] text-[#1A6B3C] font-semibold">
                           <CheckCircle2 size={14} /> Face Validated via Rekognition
                         </div>
                       )}
                       {photoError && (
-                        <div className="flex items-start gap-1.5 text-[11px] text-red-600 font-medium mt-1">
+                        <div className="flex items-start gap-1.5 text-[12px] text-[#991B1B] font-medium mt-1">
                           <AlertCircle size={13} className="shrink-0 mt-0.5" />
                           <span>{photoError}</span>
                         </div>
@@ -621,7 +649,7 @@ function SystemCheckWizard({ session }: { session: any }) {
                           setLocalPhotoPreview(null)
                           fileInputRef.current?.click()
                         }}
-                        className="mt-2 text-[11px] font-medium text-[#A4123F] hover:underline"
+                        className="mt-3 glass-btn !rounded-full px-3.5 py-1.5 text-[12px] !text-[#A4123F]"
                       >
                         Change photo
                       </button>
@@ -630,10 +658,10 @@ function SystemCheckWizard({ session }: { session: any }) {
                 )}
 
                 <div className="mt-auto">
-                  <button 
-                    onClick={handleStep} 
-                    disabled={stepLoading || photoUploading || !isPhotoValidated} 
-                    className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  <button
+                    onClick={handleStep}
+                    disabled={stepLoading || photoUploading || !isPhotoValidated}
+                    className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]"
                   >
                     {photoUploading ? <Loader2 size={16} className="animate-spin" /> : 'Confirm Photo & Continue'}
                   </button>
@@ -643,31 +671,31 @@ function SystemCheckWizard({ session }: { session: any }) {
 
             {/* Step 7: Consent */}
             {currentStep === 7 && (
-              <div className="flex-1 animate-fade-in">
-                <div className="w-12 h-12 rounded-xl bg-[#F7F7F8] flex items-center justify-center mb-6">
-                  <FileText className="text-[#6B6B6B]" />
+              <div className="flex-1 animate-fade-in flex flex-col">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] mb-6">
+                  <FileText className="text-[#A4123F]" />
                 </div>
-                <h2 className="text-xl font-bold text-[#0F0F0F] mb-3">Forensic Consent</h2>
-                <p className="text-[14px] text-[#6B6B6B] mb-6 leading-relaxed">
+                <h2 className="text-[clamp(24px,2.2vw,30px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">Forensic Consent</h2>
+                <p className="text-[15px] text-[#67636C] mb-7 leading-relaxed max-w-[640px]">
                   By proceeding, you consent to continuous forensic analysis of your video stream, network activity, and browser behavior during this session.
                 </p>
-                
-                <div className="mb-6">
-                  <label className="block text-[12px] font-semibold text-[#3A3A3A] mb-1.5">Type "I CONSENT" to proceed</label>
-                  <input 
-                    type="text" 
+
+                <div className="mb-7">
+                  <label className="auth-label">Type "I CONSENT" to proceed</label>
+                  <input
+                    type="text"
                     value={consentInput}
                     onChange={e => setConsentInput(e.target.value)}
                     placeholder="I CONSENT"
-                    className="w-full px-4 py-3 bg-white border border-[#E4E4E6] rounded-xl text-[14px] font-bold focus:border-[#A4123F] focus:ring-1 focus:ring-[#A4123F] outline-none"
+                    className="auth-input !font-bold tracking-[0.06em] focus:!border-[#A4123F]/45 focus:shadow-[0_0_0_4px_rgba(164,18,63,0.10)]"
                   />
                 </div>
 
                 <div className="mt-auto">
-                  <button 
-                    onClick={handleStep} 
-                    disabled={stepLoading || consentInput !== 'I CONSENT'} 
-                    className="w-full h-12 bg-[#A4123F] text-white font-semibold rounded-xl hover:bg-[#7A0D2E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  <button
+                    onClick={handleStep}
+                    disabled={stepLoading || consentInput !== 'I CONSENT'}
+                    className="w-full py-3.5 glass-btn-primary !rounded-full text-[15px]"
                   >
                     Accept & Continue
                   </button>
@@ -678,15 +706,15 @@ function SystemCheckWizard({ session }: { session: any }) {
             {/* Step 8: Ready */}
             {currentStep === 8 && (
               <div className="flex-1 animate-fade-in flex flex-col items-center justify-center text-center">
-                <div className="w-16 h-16 rounded-full bg-[#E6F4ED] flex items-center justify-center mb-6 animate-check-pop">
-                  <CheckCircle2 size={32} className="text-[#1A6B3C]" />
+                <div className="w-20 h-20 rounded-full bg-gradient-to-b from-[#22874D] to-[#145530] flex items-center justify-center mb-7 animate-check-pop shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_14px_30px_-12px_rgba(26,107,60,0.7)]">
+                  <CheckCircle2 size={38} className="text-white" />
                 </div>
-                <h2 className="text-2xl font-bold text-[#0F0F0F] mb-2">You're all set.</h2>
-                <p className="text-[15px] text-[#6B6B6B] mb-8">
+                <h2 className="text-[clamp(28px,2.6vw,36px)] font-bold text-[#141114] tracking-[-0.035em] mb-2">You're all set.</h2>
+                <p className="text-[15.5px] text-[#67636C] mb-9 max-w-[460px]">
                   Your device has been verified and enrolled. Good luck with your interview.
                 </p>
-                
-                <button onClick={handleStep} disabled={stepLoading} className="w-full h-14 bg-[#A4123F] text-white text-[15px] font-bold rounded-xl hover:bg-[#7A0D2E] transition-colors flex justify-center items-center gap-2">
+
+                <button onClick={handleStep} disabled={stepLoading} className="w-full max-w-[520px] py-4 glass-btn-primary !rounded-full text-[16px] !font-bold">
                   {stepLoading ? <Loader2 size={18} className="animate-spin" /> : 'Begin interview'}
                 </button>
               </div>
@@ -697,9 +725,9 @@ function SystemCheckWizard({ session }: { session: any }) {
       </div>
 
       {/* Persistent mini preview strip after step 1 */}
-      <div className={`fixed bottom-6 left-6 transition-all duration-500 ${currentStep > 1 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-        <div className="w-48 bg-white p-2 rounded-xl border border-[#E4E4E6] shadow-lg">
-          <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-[#0A0A0A]">
+      <div className={`fixed bottom-6 left-6 z-20 transition-all duration-500 ${currentStep > 1 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+        <div className="w-56 glass liquid p-2 rounded-[20px]">
+          <div className="relative w-full aspect-video rounded-[14px] overflow-hidden bg-[#0E0C10]">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
             <div className="absolute top-2 right-2 flex gap-1">
               {currentStep > 3 && <div className="w-2 h-2 rounded-full bg-amber-500" />}
@@ -707,7 +735,7 @@ function SystemCheckWizard({ session }: { session: any }) {
               {currentStep > 5 && <div className="w-2 h-2 rounded-full bg-green-500" />}
             </div>
           </div>
-          <div className="mt-2 text-center text-[10px] font-medium text-[#6B6B6B] truncate px-1">
+          <div className="mt-2 mb-0.5 text-center text-[11px] font-medium text-[#67636C] truncate px-1">
             {deviceName}
           </div>
         </div>

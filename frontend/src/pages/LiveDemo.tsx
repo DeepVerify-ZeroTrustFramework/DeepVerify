@@ -308,46 +308,64 @@ export default function LiveDemo() {
   const canPickSource = phase === 'READY' || phase === 'LIVE'
 
   return (
-    <div className="min-h-screen bg-[#F7F7F8]">
-      <nav className="max-w-6xl mx-auto px-4 pt-4">
-        <div className="flex items-center justify-between bg-white rounded-2xl shadow-sm px-5 py-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#A4123F] flex items-center justify-center">
-              <ShieldCheck size={18} className="text-white" />
+    <div className="min-h-screen relative">
+      <nav className="max-w-[1480px] mx-auto px-6 pt-6">
+        <div className="flex items-center justify-between rounded-[26px] glass liquid pl-3.5 pr-3 h-[4.75rem]">
+          <div className="flex items-center gap-3 pl-1">
+            <div className="glass-tile-maroon !w-11 !h-11 !rounded-[13px]">
+              <ShieldCheck size={20} className="text-white" />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-[#0F0F0F]">DeepVerify</div>
-              <div className="text-[11px] text-[#6B6B6B]">Live Demo - same pipeline as a live interview</div>
+              <div className="text-[17px] font-bold text-[#141114] leading-tight tracking-[-0.015em]">DeepVerify</div>
+              <div className="text-[10.5px] font-semibold text-[#85818A] leading-tight mt-0.5 uppercase tracking-[0.12em]">Live Demo - same pipeline as a live interview</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#6B6B6B] hover:bg-black/5">
-              <Home size={14} /> Home
+            <Link to="/" className="nav-ghost !text-[14px] !px-4 !py-2.5">
+              <Home size={16} /> Home
             </Link>
           </div>
         </div>
       </nav>
 
-      <div className="max-w-6xl mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
-        {/* Left: video + controls */}
-        <div className="space-y-4">
-          {error && <div className="px-4 py-3 rounded-xl bg-[#FDECEC] text-[#991B1B] text-sm">{error}</div>}
+      <header className="max-w-[1480px] mx-auto px-6 pt-12 pb-8 flex flex-wrap items-end justify-between gap-6">
+        <div>
+          <p className="glass-label !text-[#A4123F] mb-3">Live demo · forensic pipeline</p>
+          <h1 className="text-[clamp(32px,3.4vw,48px)] font-bold text-[#141114] tracking-[-0.04em] leading-[1.05]">
+            Watch DeepVerify verify a camera <span className="intro-verify">in real time.</span>
+          </h1>
+          <p className="mt-3 text-[15px] text-[#67636C] max-w-[640px] leading-relaxed">
+            Enrol your webcam, then stream it — or swap in a recording, an AI video or a virtual camera — and see every signal respond live.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 font-mono text-[11px] tracking-[0.16em] text-[#85818A]">
+          <span className="glass-chip !px-3 !py-1.5 !text-[11px] !font-mono">PRNU</span>
+          <span className="glass-chip !px-3 !py-1.5 !text-[11px] !font-mono">rPPG</span>
+          <span className="glass-chip !px-3 !py-1.5 !text-[11px] !font-mono">JITTER</span>
+          <span className="glass-chip !px-3 !py-1.5 !text-[11px] !font-mono">BEHAVIORAL</span>
+        </div>
+      </header>
 
-          <div className="relative bg-black rounded-2xl overflow-hidden aspect-video">
+      <div className="max-w-[1480px] mx-auto px-6 pb-16 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] gap-6 items-start">
+        {/* Left: video + controls */}
+        <div className="space-y-5">
+          {error && <div className="px-5 py-3.5 rounded-[18px] glass-soft !bg-[rgba(254,226,226,0.75)] !border-[#FCA5A5]/60 text-[#991B1B] text-[14px] font-medium">{error}</div>}
+
+          <div className="relative bg-[#0E0C10] rounded-[26px] overflow-hidden aspect-video m-2.5 shadow-[0_0_0_10px_rgba(255,255,255,0.55),0_0_0_11px_rgba(255,255,255,0.95),0_0_0_12px_rgba(20,14,18,0.05),0_40px_90px_-30px_rgba(20,14,18,0.5)]">
             <video ref={videoRef} playsInline muted className="w-full h-full object-contain"
               style={mirrored ? { transform: 'scaleX(-1)' } : undefined} />
             {!source && (
-              <div className="absolute inset-0 flex items-center justify-center text-white/60 text-sm">
+              <div className="absolute inset-0 flex items-center justify-center text-white/55 text-[15px] font-medium tracking-wide bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06),transparent_65%)]">
                 Enroll your webcam to begin
               </div>
             )}
             {source && (
-              <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-black/60 text-white text-[11px]">
+              <div className="absolute top-4 left-4 px-3.5 py-2 rounded-full bg-black/45 border border-white/15 backdrop-blur-md text-white/90 text-[12px] font-medium">
                 {source.kind === 'camera' ? 'Camera' : 'Video file'}: {source.label}
               </div>
             )}
             {phase === 'LIVE' && (
-              <div className="absolute top-3 right-3 px-2.5 py-1 rounded-lg bg-[#A4123F] text-white text-[11px] font-semibold">
+              <div className="absolute top-4 right-4 px-3.5 py-2 rounded-full bg-[#A4123F]/90 border border-white/20 text-white text-[12px] font-semibold font-mono tracking-wide shadow-[0_6px_18px_-6px_rgba(164,18,63,0.8)]">
                 LIVE - {framesSent} frames
               </div>
             )}
@@ -355,32 +373,32 @@ export default function LiveDemo() {
 
           {/* Quick start */}
           {phase === 'SETUP' && (
-            <div className="bg-[#0F0F0F] rounded-2xl p-5 shadow-sm flex flex-wrap items-center justify-between gap-3">
+            <div className="glass-dark liquid rounded-[28px] px-7 py-6 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <div className="text-[14px] font-bold text-white">Verify my live webcam</div>
-                <p className="text-[12px] text-white/60">Enrolls your camera, then streams it continuously like a genuine interview candidate.</p>
+                <div className="text-[18px] font-semibold text-white tracking-[-0.015em]">Verify my live webcam</div>
+                <p className="text-[14px] text-white/60 mt-1">Enrolls your camera, then streams it continuously like a genuine interview candidate.</p>
               </div>
               <button onClick={quickStart} disabled={!sessionId || !enrollDevice}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#1A6B3C] text-white text-sm font-semibold disabled:opacity-40">
+                className="glass-btn !bg-white/95 !text-[#141114] px-6 py-3 text-[14.5px] !rounded-full disabled:opacity-40">
                 <Play size={15} /> Start live webcam
               </button>
             </div>
           )}
 
           {/* Step 1 */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-1">1. Enroll your real webcam</div>
-            <p className="text-[12px] text-[#6B6B6B] mb-3">
+          <div className="glass liquid rounded-[28px] p-7">
+            <div className="text-[17px] font-semibold text-[#141114] tracking-[-0.015em] mb-1.5">1. Enroll your real webcam</div>
+            <p className="text-[14px] text-[#67636C] leading-relaxed mb-5 max-w-[760px]">
               Records this camera's sensor fingerprint (about 4 seconds), like the system check before an interview.
               Every source you stream is then compared against it.
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <select value={enrollDevice} onChange={(e) => setEnrollDevice(e.target.value)} disabled={phase !== 'SETUP'}
-                className="text-sm border border-[#E5E5E5] rounded-lg px-3 py-2 min-w-[220px]">
+                className="glass-input !w-auto !py-3 !px-4 !text-[14.5px] min-w-[280px] disabled:opacity-60">
                 {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Camera'}</option>)}
               </select>
               <button onClick={enroll} disabled={!sessionId || phase !== 'SETUP' || !enrollDevice}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#A4123F] text-white text-sm font-semibold disabled:opacity-40">
+                className="glass-btn-primary px-6 py-3 text-[14.5px] !rounded-full disabled:opacity-40">
                 {phase === 'ENROLLING' ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
                 {phase === 'ENROLLING' ? `Enrolling ${enrollPct}%` : phase === 'SETUP' ? 'Enroll webcam' : 'Enrolled'}
               </button>
@@ -388,40 +406,40 @@ export default function LiveDemo() {
           </div>
 
           {/* Step 2 */}
-          <div className={`bg-white rounded-2xl p-5 shadow-sm ${canPickSource ? '' : 'opacity-50 pointer-events-none'}`}>
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-1">2. Genuine candidate or cheating attempt?</div>
-            <p className="text-[12px] text-[#6B6B6B] mb-3">
+          <div className={`glass liquid rounded-[28px] p-7 transition-opacity ${canPickSource ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="text-[17px] font-semibold text-[#141114] tracking-[-0.015em] mb-1.5">2. Genuine candidate or cheating attempt?</div>
+            <p className="text-[14px] text-[#67636C] leading-relaxed mb-5 max-w-[760px]">
               Any camera (including OBS Virtual Camera) or a video file played as the camera. You can switch while streaming.
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2.5">
               {devices.map((d) => (
                 <button key={d.deviceId} onClick={() => applySource({ kind: 'camera', deviceId: d.deviceId, label: d.label || 'Camera' })}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${source?.kind === 'camera' && source.deviceId === d.deviceId ? 'border-[#A4123F] text-[#A4123F] bg-[#FDF2F5]' : 'border-[#E5E5E5] text-[#3A3A3A]'}`}>
-                  <Camera size={14} /> <span className="text-[#1A6B3C] font-semibold">Genuine:</span> {d.label || 'Camera'}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-[16px] border text-[14px] font-medium transition-all ${source?.kind === 'camera' && source.deviceId === d.deviceId ? 'border-[#A4123F]/50 text-[#A4123F] bg-white shadow-[0_0_0_3px_rgba(164,18,63,0.10),0_6px_16px_-8px_rgba(20,14,18,0.25)]' : 'border-white/90 text-[#2A262C] bg-white/55 hover:bg-white/80 shadow-[inset_0_1px_0_#fff]'}`}>
+                  <Camera size={16} /> <span className="text-[#1A6B3C] font-semibold">Genuine:</span> {d.label || 'Camera'}
                 </button>
               ))}
-              <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm cursor-pointer ${source?.kind === 'file' ? 'border-[#A4123F] text-[#A4123F] bg-[#FDF2F5]' : 'border-[#E5E5E5] text-[#3A3A3A]'}`}>
-                <Upload size={14} /> <span className="text-[#991B1B] font-semibold">Simulate cheating:</span> {source?.kind === 'file' ? source.label : 'play a pre-recorded or AI video'}
+              <label className={`flex items-center gap-2 px-4 py-3 rounded-[16px] border text-[14px] font-medium cursor-pointer transition-all ${source?.kind === 'file' ? 'border-[#A4123F]/50 text-[#A4123F] bg-white shadow-[0_0_0_3px_rgba(164,18,63,0.10),0_6px_16px_-8px_rgba(20,14,18,0.25)]' : 'border-white/90 text-[#2A262C] bg-white/55 hover:bg-white/80 shadow-[inset_0_1px_0_#fff]'}`}>
+                <Upload size={16} /> <span className="text-[#991B1B] font-semibold">Simulate cheating:</span> {source?.kind === 'file' ? source.label : 'play a pre-recorded or AI video'}
                 <input type="file" accept="video/*" className="hidden" onChange={onFile} />
               </label>
             </div>
           </div>
 
           {/* Step 3 */}
-          <div className={`bg-white rounded-2xl p-5 shadow-sm ${canPickSource ? '' : 'opacity-50 pointer-events-none'}`}>
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-1">3. Stream and verify</div>
-            <p className="text-[12px] text-[#6B6B6B] mb-3">
+          <div className={`glass liquid rounded-[28px] p-7 transition-opacity ${canPickSource ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="text-[17px] font-semibold text-[#141114] tracking-[-0.015em] mb-1.5">3. Stream and verify</div>
+            <p className="text-[14px] text-[#67636C] leading-relaxed mb-5 max-w-[760px]">
               Runs PRNU, rPPG, jitter and random head-turn checks exactly as in an interview. The first head-turn check comes after about 10 seconds,
               then every 30-45 seconds. A video file can't respond, so it fails them - that's how replays are caught.
             </p>
             {phase !== 'LIVE' ? (
               <button onClick={startLive} disabled={!source}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0F0F0F] text-white text-sm font-semibold disabled:opacity-40">
+                className="glass-btn-primary px-6 py-3 text-[14.5px] !rounded-full disabled:opacity-40">
                 <Play size={15} /> Start live verification
               </button>
             ) : (
               <div className="flex flex-wrap gap-2">
-                <button onClick={stopLive} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#EFEFF0] text-[#0F0F0F] text-sm font-semibold">
+                <button onClick={stopLive} className="glass-btn px-6 py-3 text-[14.5px] !rounded-full">
                   <Square size={15} /> Stop
                 </button>
               </div>
@@ -430,17 +448,17 @@ export default function LiveDemo() {
         </div>
 
         {/* Right: live results */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-3">Fusion Trust Score</div>
+        <div className="space-y-5 lg:sticky lg:top-6">
+          <div className="glass liquid rounded-[28px] p-6">
+            <div className="glass-label !text-[11.5px] mb-5">Fusion Trust Score</div>
             <TrustGauge score={score} />
           </div>
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-3">Module Breakdown</div>
+          <div className="glass liquid rounded-[28px] p-6">
+            <div className="glass-label !text-[11.5px] mb-5">Module Breakdown</div>
             <ModuleBreakdown breakdown={breakdown} />
           </div>
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-[13px] font-bold text-[#0F0F0F] mb-3">Forensic Alerts</div>
+          <div className="glass liquid rounded-[28px] p-6">
+            <div className="glass-label !text-[11.5px] mb-5">Forensic Alerts</div>
             <AlertFeed alerts={alerts} onAcknowledge={acknowledgeAlert} />
           </div>
         </div>

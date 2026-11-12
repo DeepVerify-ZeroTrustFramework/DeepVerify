@@ -20,9 +20,9 @@ export default function TrustGauge({ score = 100 }: { score?: number }) {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative w-[160px] h-[160px] mb-2" style={{ '--ring-circumference': circumference } as React.CSSProperties}>
+      <div className="relative w-[160px] h-[160px] mb-3 rounded-full bg-white/50 shadow-[inset_0_1px_0_#fff,inset_0_-10px_24px_rgba(20,14,18,0.04),0_10px_30px_-14px_rgba(20,14,18,0.25)]" style={{ '--ring-circumference': circumference } as React.CSSProperties}>
         <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-          <circle cx="60" cy="60" r="54" fill="none" stroke="#EFEFF0" strokeWidth="6" />
+          <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(20,17,20,0.07)" strokeWidth="6" />
           <circle
             cx="60" cy="60" r="54" fill="none"
             stroke={color} strokeWidth="6"
@@ -40,7 +40,7 @@ export default function TrustGauge({ score = 100 }: { score?: number }) {
           >
             {Math.round(score)}
           </span>
-          <span className="text-[10px] text-[#6B6B6B] uppercase tracking-widest mt-1">
+          <span className="text-[10px] font-semibold text-[#85818A] uppercase tracking-[0.18em] mt-1">
             Trust
           </span>
         </div>
@@ -48,7 +48,7 @@ export default function TrustGauge({ score = 100 }: { score?: number }) {
       
       <div className="text-center animate-fade-in">
         <span 
-          className="inline-block px-3 py-1 text-[11px] font-bold uppercase tracking-wider rounded-full transition-colors"
+          className="inline-block px-3.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] rounded-full transition-colors border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
           style={{ backgroundColor: `${color}15`, color }}
         >
           {status}

@@ -16,12 +16,18 @@ import StudentInbox from './pages/student/StudentInbox'
 import RecruiterDashboard from './pages/recruiter/RecruiterDashboard'
 
 import ErrorBoundary from './components/ErrorBoundary'
+import GlassClickEffect from './components/GlassClickEffect'
+import AppBackground from './components/AppBackground'
+import RouteTransition from './components/RouteTransition'
 import './index.css'
 
 function App() {
   return (
     <ErrorBoundary>
+      <GlassClickEffect />
       <BrowserRouter>
+        <AppBackground />
+        <RouteTransition>
         <Routes>
           {/* Public & Landing */}
           <Route path="/" element={<Landing />} />
@@ -51,6 +57,7 @@ function App() {
           <Route path="/404" element={<NotFound />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </RouteTransition>
       </BrowserRouter>
     </ErrorBoundary>
   )

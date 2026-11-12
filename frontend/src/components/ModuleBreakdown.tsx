@@ -26,15 +26,15 @@ export default function ModuleBreakdown({ breakdown, uploadMode = false, prnuNA 
         if (uploadMode && (m.key === 'behavioral' || m.key === 'jitter' || (m.key === 'prnu' && prnuNA))) {
           return (
             <div key={m.key} className="flex items-center gap-3 opacity-60">
-              <div className="w-8 h-8 rounded-lg bg-[#F7F7F8] flex items-center justify-center shrink-0">
+              <div className="glass-tile !w-9 !h-9 !rounded-[11px] shrink-0">
                 <Icon size={16} className="text-[#9B9B9B]" />
               </div>
               <div className="flex-1">
                 <div className="flex justify-between items-end mb-1">
-                  <span className="text-[12px] font-semibold text-[#6B6B6B]">{m.label}</span>
+                  <span className="text-[12px] font-semibold text-[#67636C]">{m.label}</span>
                   <span className="text-[11px] font-mono text-[#9B9B9B]">{naText}</span>
                 </div>
-                <div className="h-1.5 rounded-full bg-[#EFEFF0]" />
+                <div className="h-1.5 rounded-full bg-[rgba(20,17,20,0.07)] shadow-[inset_0_1px_1px_rgba(20,14,18,0.06)]" />
               </div>
             </div>
           )
@@ -45,12 +45,12 @@ export default function ModuleBreakdown({ breakdown, uploadMode = false, prnuNA 
 
         return (
           <div key={m.key} className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-[#F7F7F8] flex items-center justify-center shrink-0">
-              <Icon size={16} className="text-[#6B6B6B]" />
+            <div className="glass-tile !w-9 !h-9 !rounded-[11px] shrink-0">
+              <Icon size={16} className="text-[#A4123F]" />
             </div>
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
-                <span className="text-[12px] font-semibold text-[#3A3A3A]">
+                <span className="text-[12.5px] font-semibold text-[#2A262C]">
                   {m.label}
                   {/* rPPG points include the AI face check (Sightengine): show its score */}
                   {m.key === 'rppg' && typeof breakdown?.ai_face === 'number' && (
@@ -62,11 +62,11 @@ export default function ModuleBreakdown({ breakdown, uploadMode = false, prnuNA 
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] font-mono text-[#6B6B6B]">
+                <span className="text-[11px] font-mono font-medium text-[#55515A] tabular-nums">
                   {val.toFixed(1)} <span className="text-[9px]">/ {m.max}</span>
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-[#EFEFF0] overflow-hidden">
+              <div className="h-1.5 rounded-full bg-[rgba(20,17,20,0.07)] shadow-[inset_0_1px_1px_rgba(20,14,18,0.06)] overflow-hidden">
                 <div 
                   className="h-full rounded-full transition-all duration-500 ease-out"
                   style={{ width, backgroundColor: color }}
