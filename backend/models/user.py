@@ -128,3 +128,21 @@ class InvitationResponse(BaseModel):
     message: Optional[str] = None
     status: str = "PENDING"
     created_at: datetime
+
+
+# --- Profile Settings Models ---
+
+class ProfileUpdate(BaseModel):
+    """Editable profile fields. Only the fields that apply to the user's role are saved."""
+    full_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    phone: Optional[str] = Field(None, max_length=30)
+    company_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    designation: Optional[str] = Field(None, min_length=2, max_length=150)
+    college: Optional[str] = Field(None, min_length=2, max_length=150)
+    degree: Optional[str] = Field(None, min_length=2, max_length=150)
+    graduation_year: Optional[str] = Field(None, max_length=10)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=100)
+    new_password: str = Field(..., min_length=6, max_length=100)

@@ -131,6 +131,18 @@ class FaceVerifierService:
             except Exception as e:
                 logger.error(f"[FaceVerifier] Cloudinary upload failed ({e}). Falling back to local storage.")
 
+        # Local storage only works on THIS machine. With a shared (cloud) database the saved
+        # link points at a file other machines don't have, so warn loudly.
+        _mongo_url = os.getenv("MONGODB_URL", "")
+        if _mongo_url and not any(h in _mongo_url for h in ("localhost", "127.0.0.1", "mongodb://mongo")):
+            logger.error(
+                "[FaceVerifier] Cloudinary unavailable (%s) - saving %s/%s.jpg to this machine's disk only. "
+                "The database is shared, so this image will NOT load on any other machine. "
+                "Set CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET in backend/.env.",
+                "cloudinary library not installed" if not HAS_CLOUDINARY else "credentials missing or upload failed",
+                folder, filename,
+            )
+
         # Local storage fallback
         target_dir = LOCAL_UPLOAD_DIR / folder
         target_dir.mkdir(parents=True, exist_ok=True)

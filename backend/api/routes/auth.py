@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, s
 from db.mongo import get_users_collection
 from models.user import (
     UserRole, CandidateRegister, RecruiterRegister, UserLogin,
-    UserResponse, AuthTokenResponse
+    UserResponse, AuthTokenResponse, ProfileUpdate, PasswordChange
 )
 from auth.security import (
     verify_password, get_password_hash, create_access_token, get_current_user
@@ -272,3 +272,55 @@ async def update_profile_photo(
 
     current_user["profile_photo_url"] = profile_photo_url
     return await get_current_user_profile(current_user)
+
+
+# Fields each role may edit from Settings (email, role and photo are not editable here).
+_EDITABLE_FIELDS = {
+    UserRole.RECRUITER.value: {"full_name", "phone", "company_name", "designation"},
+    UserRole.CANDIDATE.value: {"full_name", "phone", "college", "degree", "graduation_year"},
+}
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_current_user_profile(
+    data: ProfileUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update the logged-in user's own profile details (Settings > Profile)."""
+    allowed = _EDITABLE_FIELDS.get(current_user.get("role"), {"full_name", "phone"})
+    updates = {}
+    for key, value in data.model_dump(exclude_none=True).items():
+        if key not in allowed or not isinstance(value, str):
+            continue
+        value = value.strip()
+        if key == "full_name" and len(value) < 2:
+            raise HTTPException(status_code=400, detail="Full name must be at least 2 characters.")
+        if key in ("company_name", "designation", "college", "degree") and len(value) < 2:
+            raise HTTPException(status_code=400, detail=f"{key.replace('_', ' ').capitalize()} must be at least 2 characters.")
+        updates[key] = value
+
+    if updates:
+        users_col = get_users_collection()
+        await users_col.update_one({"user_id": current_user["user_id"]}, {"$set": updates})
+        current_user.update(updates)
+
+    return await get_current_user_profile(current_user)
+
+
+@router.post("/password")
+async def change_password(
+    data: PasswordChange,
+    current_user: dict = Depends(get_current_user)
+):
+    """Change the logged-in user's password (Settings > Security)."""
+    if not verify_password(data.current_password, current_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    if data.current_password == data.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current password.")
+
+    users_col = get_users_collection()
+    await users_col.update_one(
+        {"user_id": current_user["user_id"]},
+        {"$set": {"password_hash": get_password_hash(data.new_password)}}
+    )
+    return {"ok": True, "message": "Password updated successfully."}

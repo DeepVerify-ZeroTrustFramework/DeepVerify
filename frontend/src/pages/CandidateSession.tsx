@@ -854,65 +854,68 @@ export default function CandidateSession() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center">
-        <Loader2 className="animate-spin text-white" />
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="glass-tile !w-16 !h-16 !rounded-[20px]"><Loader2 className="animate-spin text-[#A4123F]" /></div>
       </div>
     )
   }
 
   if (error || !session) {
     return (
-      <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center text-center p-6">
-        <AlertCircle className="text-red-500 w-12 h-12 mb-4" />
-        <h1 className="text-xl font-bold text-white mb-2">Error</h1>
-        <p className="text-gray-400">{error}</p>
+      <div className="min-h-screen flex flex-col items-center justify-center text-center p-6">
+        <div className="glass-strong liquid rounded-[32px] px-12 py-12 flex flex-col items-center max-w-md w-full">
+        <div className="glass-tile !w-16 !h-16 !rounded-[20px] mb-5"><AlertCircle className="text-[#991B1B] w-8 h-8" /></div>
+        <h1 className="text-[22px] font-bold text-[#141114] tracking-[-0.02em] mb-2">Error</h1>
+        <p className="text-[15px] text-[#67636C]">{error}</p>
+        </div>
       </div>
     )
   }
 
   if (isEnded) {
     return (
-      <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="w-full max-w-lg bg-white border border-[#EAEAEA] rounded-3xl p-10 shadow-lg flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full bg-[#F0FDF4] border-2 border-[#16A34A] flex items-center justify-center text-[#16A34A] mb-6 shadow-md shadow-green-100">
-            <CheckCircle2 size={42} />
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-full max-w-[640px] glass-strong liquid rounded-[36px] p-10 sm:p-12 flex flex-col items-center">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-b from-[#22874D] to-[#145530] flex items-center justify-center text-white mb-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_14px_30px_-12px_rgba(26,107,60,0.7)]">
+            <CheckCircle2 size={40} />
           </div>
-          <h1 className="text-2xl font-bold text-[#0F0F0F] mb-2">Interview Concluded</h1>
-          <p className="text-sm text-[#555] mb-6 max-w-md leading-relaxed">
-            Thank you, <strong className="text-[#0F0F0F]">{session?.candidate_name || 'Candidate'}</strong>! Your technical interview session has been successfully finalized and submitted.
+          <p className="glass-label !text-[#A4123F] mb-3">Submitted</p>
+          <h1 className="text-[clamp(28px,2.8vw,38px)] font-bold text-[#141114] tracking-[-0.035em] mb-3">Interview Concluded</h1>
+          <p className="text-[15px] text-[#67636C] mb-8 max-w-md leading-relaxed">
+            Thank you, <strong className="text-[#141114] font-semibold">{session?.candidate_name || 'Candidate'}</strong>! Your technical interview session has been successfully finalized and submitted.
           </p>
 
-          <div className="w-full bg-[#F9F9FB] border border-[#E5E5E8] rounded-2xl p-5 mb-8 text-left space-y-3">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-[#6B6B6B]">Session ID:</span>
-              <span className="font-mono font-bold text-[#0F0F0F]">{session?.session_id}</span>
+          <div className="w-full rounded-[22px] glass-inset p-1.5 mb-8 text-left divide-y divide-[rgba(20,17,20,0.06)]">
+            <div className="flex justify-between items-center gap-4 px-4 py-3.5 text-[14px]">
+              <span className="text-[#67636C]">Session ID:</span>
+              <span className="font-mono font-semibold text-[#141114]">{session?.session_id}</span>
             </div>
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-[#6B6B6B]">Role:</span>
-              <span className="font-semibold text-[#0F0F0F]">{session?.role || 'Software Engineer'}</span>
+            <div className="flex justify-between items-center gap-4 px-4 py-3.5 text-[14px]">
+              <span className="text-[#67636C]">Role:</span>
+              <span className="font-semibold text-[#141114] text-right">{session?.role || 'Software Engineer'}</span>
             </div>
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-[#6B6B6B]">Identity Verification:</span>
-              <span className="inline-flex items-center gap-1 font-bold text-[#1A6B3C]">
-                <CheckCircle2 size={13} /> {faceVerified ? 'Verified via AWS Rekognition' : 'Submitted'}
+            <div className="flex justify-between items-center gap-4 px-4 py-3.5 text-[14px]">
+              <span className="text-[#67636C]">Identity Verification:</span>
+              <span className="inline-flex items-center gap-1 font-semibold text-[#1A6B3C]">
+                <CheckCircle2 size={14} /> {faceVerified ? 'Verified via AWS Rekognition' : 'Submitted'}
               </span>
             </div>
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-[#6B6B6B]">Total Duration:</span>
-              <span className="font-mono font-bold text-[#0F0F0F]">{formatTime(elapsed)}</span>
+            <div className="flex justify-between items-center gap-4 px-4 py-3.5 text-[14px]">
+              <span className="text-[#67636C]">Total Duration:</span>
+              <span className="font-mono font-semibold text-[#141114]">{formatTime(elapsed)}</span>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 w-full">
             <button
               onClick={() => navigate('/student/inbox')}
-              className="flex-1 py-3 px-5 rounded-xl bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              className="flex-1 glass-btn-primary !rounded-full py-3.5 px-6 text-[14.5px] cursor-pointer"
             >
-              <Home size={15} /> Return to Portal
+              <Home size={16} /> Return to Portal
             </button>
             <button
               onClick={() => navigate('/')}
-              className="py-3 px-5 rounded-xl border border-[#D5D5D7] hover:bg-gray-50 text-xs font-semibold text-[#3A3A3A] transition-colors cursor-pointer"
+              className="glass-btn !rounded-full py-3.5 px-6 text-[14.5px] cursor-pointer"
             >
               Exit to Homepage
             </button>
@@ -927,74 +930,78 @@ export default function CandidateSession() {
       {/* FULLSCREEN ENFORCEMENT OVERLAY — only after identity verification, so the
           AWS Rekognition step happens first, without full-screen prompts on top */}
       {faceVerified && !isFullscreen && (
-        <div className="fixed inset-0 z-[9999] bg-[#0A0B0E]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 mb-6 border border-amber-500/30">
-            <Maximize2 size={32} />
+        <div className="fixed inset-0 z-[9999] bg-[rgba(244,243,241,0.82)] backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+          <div className="glass-strong liquid rounded-[36px] px-10 py-12 sm:px-14 max-w-[560px] w-full flex flex-col items-center">
+          <div className="glass-tile !w-16 !h-16 !rounded-[20px] text-[#A4123F] mb-6">
+            <Maximize2 size={28} />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-4">Full Screen Required</h1>
-          <p className="text-gray-300 max-w-md mb-8 leading-relaxed">
+          <h1 className="text-[clamp(26px,2.6vw,34px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">Full Screen Required</h1>
+          <p className="text-[15px] text-[#67636C] max-w-md mb-8 leading-relaxed">
             This technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment.
           </p>
           <button
             onClick={toggleFullscreen}
-            className="px-8 py-3 rounded-xl bg-[#A4123F] hover:bg-[#850E32] text-white font-bold transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-[#A4123F]/30"
+            className="glass-btn-primary !rounded-full px-8 py-3.5 text-[15px] cursor-pointer"
           >
             <Monitor size={18} />
             <span>Enter Full Screen to Continue</span>
           </button>
+          </div>
         </div>
       )}
 
       {/* TAB SWITCH WARNING OVERLAY */}
       {showTabWarning && isFullscreen && (
-        <div className="fixed inset-0 z-[9998] bg-[#0A0B0E]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 mb-6 border border-red-500/30">
-            <AlertTriangle size={32} />
+        <div className="fixed inset-0 z-[9998] bg-[rgba(244,243,241,0.82)] backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+          <div className="glass-strong liquid rounded-[36px] px-10 py-12 sm:px-14 max-w-[560px] w-full flex flex-col items-center ring-1 ring-[#991B1B]/20">
+          <div className="glass-tile !w-16 !h-16 !rounded-[20px] text-[#991B1B] mb-6">
+            <AlertTriangle size={28} />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-4">Focus Lost</h1>
-          <p className="text-gray-300 max-w-md mb-8 leading-relaxed">
+          <h1 className="text-[clamp(26px,2.6vw,34px)] font-bold text-[#141114] tracking-[-0.03em] mb-3">Focus Lost</h1>
+          <p className="text-[15px] text-[#67636C] max-w-md mb-8 leading-relaxed">
             You switched tabs or minimized the window. Leaving the interview environment is strictly prohibited. This incident has been logged and flagged on your trust score.
           </p>
           <button
             onClick={() => setShowTabWarning(false)}
-            className="px-8 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-600/30"
+            className="glass-btn-primary !rounded-full px-8 py-3.5 text-[15px] cursor-pointer"
           >
             <Check size={18} />
             <span>I Understand, Return to Interview</span>
           </button>
+          </div>
         </div>
       )}
 
       {/* ACTIVE LIVENESS CHECK — floats above everything but never blocks the
           interview. No time limit; the candidate can close it (interviewer is told). */}
       {livenessChallenge && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,520px)] pointer-events-none animate-fade-in">
-          <div className="relative pointer-events-auto rounded-2xl bg-[#0F1115]/95 border border-[#A4123F] shadow-2xl shadow-[#A4123F]/30 px-6 py-5 text-center">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,540px)] pointer-events-none animate-fade-in">
+          <div className="relative pointer-events-auto rounded-[28px] bg-[rgba(255,255,255,0.94)] border border-[#A4123F]/30 shadow-[0_0_0_4px_rgba(164,18,63,0.08),0_30px_70px_-24px_rgba(20,14,18,0.45)] px-7 py-6 text-center">
             <button
               onClick={skipLiveness}
               title="Close the liveness check (your interviewer will be notified)"
-              className="absolute top-3 right-3 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="absolute top-3.5 right-3.5 glass-icon-btn !w-8 !h-8 !rounded-full"
             >
-              <X size={16} />
+              <X size={15} />
             </button>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-gray-400 mb-3 px-6">
+            <p className="glass-label !text-[10.5px] !text-[#A4123F] mb-3 px-6">
               {livenessChallenge.origin === 'interviewer' ? 'Requested by your interviewer · ' :
                 livenessChallenge.origin === 'start' ? 'Before we begin · ' : ''}
               Liveness check · step {livenessChallenge.step} of {livenessChallenge.of}
             </p>
             {livenessChallenge.note === 'wrong_way' && (
-              <p className="text-[12px] font-semibold text-amber-300 mb-2">That was the other way - let's try again.</p>
+              <p className="text-[13px] font-semibold text-[#92400E] mb-2">That was the other way - let's try again.</p>
             )}
             {livenessProgress && livenessProgress.face && !livenessProgress.armed ? (
-              <p className="text-xl font-bold text-white mb-3">Look straight at the camera</p>
+              <p className="text-[22px] font-bold text-[#141114] tracking-[-0.02em] mb-3">Look straight at the camera</p>
             ) : (
               <div className="flex items-center justify-center gap-4 mb-3">
-                {livenessChallenge.direction === 'LEFT' && <ArrowLeft size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
-                <p className="text-2xl font-bold text-white">{livenessChallenge.instruction}</p>
-                {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#FF4D7E] animate-pulse shrink-0" />}
+                {livenessChallenge.direction === 'LEFT' && <ArrowLeft size={44} className="text-[#A4123F] animate-pulse shrink-0" />}
+                <p className="text-[26px] font-bold text-[#141114] tracking-[-0.025em]">{livenessChallenge.instruction}</p>
+                {livenessChallenge.direction === 'RIGHT' && <ArrowRight size={44} className="text-[#A4123F] animate-pulse shrink-0" />}
               </div>
             )}
-            <p className="text-[12px] text-gray-400 mb-3">
+            <p className="text-[13px] text-[#67636C] mb-3">
               Take your time - there is no time limit. Turn clearly, then face the screen again.
             </p>
             {livenessProgress && (
@@ -1002,23 +1009,23 @@ export default function CandidateSession() {
                 {livenessProgress.face ? (
                   livenessProgress.armed && (
                     <>
-                      <div className="flex justify-between text-[11px] text-gray-300 mb-1">
+                      <div className="flex justify-between text-[12px] text-[#55515A] mb-1.5">
                         <span>{livenessProgress.wrongWay ? 'Other way - turn to the arrow side' : 'Turn detected'}</span>
-                        <span>{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
+                        <span className="font-mono font-semibold">{Math.round(Math.min(1, livenessProgress.progress) * 100)}%</span>
                       </div>
-                      <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                        <div className={`h-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                      <div className="h-2.5 rounded-full bg-[rgba(20,17,20,0.08)] overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-200 ${livenessProgress.progress >= 1 ? 'bg-[#1A6B3C]' : 'bg-gradient-to-r from-[#B01848] to-[#7A0D2E]'}`}
                           style={{ width: `${Math.min(100, livenessProgress.progress * 100)}%` }} />
                       </div>
                     </>
                   )
                 ) : (
-                  <p className="text-[12px] font-semibold text-amber-300">Face not detected - keep your face in view and well lit</p>
+                  <p className="text-[13px] font-semibold text-[#92400E]">Face not detected - keep your face in view and well lit</p>
                 )}
               </div>
             )}
             {livenessFailNotice && (
-              <p className="mt-3 text-[12px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+              <p className="mt-3 text-[13px] text-[#92400E] bg-[rgba(254,243,199,0.8)] border border-[#FDE68A] rounded-[14px] px-3.5 py-2.5">
                 {livenessFailNotice}
               </p>
             )}
@@ -1026,29 +1033,31 @@ export default function CandidateSession() {
         </div>
       )}
       {livenessResult && !livenessChallenge && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,460px)] pointer-events-none animate-fade-in">
-          <div className={`rounded-2xl px-5 py-4 flex items-center gap-3 shadow-2xl border ${
-            livenessResult.passed ? 'bg-[#06210F]/95 border-emerald-500/60' : 'bg-[#2A1A05]/95 border-amber-500/60'
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] w-[min(92vw,480px)] pointer-events-none animate-fade-in">
+          <div className={`rounded-[22px] px-5 py-4 flex items-center gap-3 shadow-[0_24px_60px_-24px_rgba(20,14,18,0.45)] border bg-[rgba(255,255,255,0.95)] ${
+            livenessResult.passed ? 'border-[#1A6B3C]/35' : 'border-[#D97706]/40'
           }`}>
             {livenessResult.passed
-              ? <CheckCircle2 size={22} className="text-emerald-400 shrink-0" />
-              : <AlertTriangle size={22} className="text-amber-400 shrink-0" />}
-            <p className="text-sm text-white">{livenessResult.message}</p>
+              ? <CheckCircle2 size={22} className="text-[#1A6B3C] shrink-0" />
+              : <AlertTriangle size={22} className="text-[#D97706] shrink-0" />}
+            <p className="text-[14px] font-medium text-[#141114]">{livenessResult.message}</p>
           </div>
         </div>
       )}
 
-      <div className="h-screen bg-[#0A0A0A] flex flex-col overflow-hidden text-white font-sans relative">
+      <div className="h-screen flex flex-col overflow-hidden text-[#141114] font-sans relative">
       {/* Violation Alert Toasts */}
-      <div className="fixed top-16 right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-sm">
+      <div className="fixed top-24 right-6 z-50 flex flex-col gap-2.5 pointer-events-none max-w-sm">
         {violations.map((v) => (
           <div
             key={v.id}
-            className="flex items-start gap-2.5 p-3 rounded-lg bg-[#2A0808] border border-[#DC2626] text-white shadow-2xl animate-fade-in pointer-events-auto"
+            className="flex items-start gap-3 px-4 py-3.5 rounded-[18px] bg-[rgba(255,255,255,0.96)] border border-[#991B1B]/25 text-[#141114] shadow-[0_0_0_3px_rgba(153,27,27,0.06),0_20px_44px_-20px_rgba(20,14,18,0.45)] animate-fade-in pointer-events-auto"
           >
-            <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={16} />
-            <div className="flex-1 text-[12px] leading-snug">
-              <span className="font-bold text-red-300 block uppercase text-[10px] tracking-wider mb-0.5">
+            <span className="w-7 h-7 rounded-full bg-[rgba(153,27,27,0.08)] flex items-center justify-center shrink-0">
+              <AlertTriangle className="text-[#991B1B]" size={15} />
+            </span>
+            <div className="flex-1 text-[13px] leading-snug text-[#4A464E]">
+              <span className="font-bold text-[#991B1B] block uppercase text-[10.5px] tracking-[0.12em] mb-0.5">
                 Integrity Notice · {v.type.replace('_', ' ')}
               </span>
               {v.message}
@@ -1058,22 +1067,26 @@ export default function CandidateSession() {
       </div>
 
       {/* Top bar */}
-      <div className="h-14 bg-[#0F0F0F] border-b border-[#1A1A1A] flex items-center justify-between px-6 shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#1A6B3C]/10 border border-[#1A6B3C]/30 text-[#4CAF50] text-[11px] font-medium">
-            <ShieldCheck size={14} /> Active Proctored Session
+      <div className="shrink-0 z-10 px-4 pt-4">
+        <div className="min-h-16 rounded-[24px] glass-static liquid flex flex-wrap items-center justify-between gap-3 pl-3 pr-3 py-2">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="glass-tile-maroon !w-10 !h-10 !rounded-[12px] shrink-0">
+            <ShieldCheck size={18} className="text-white" />
+          </div>
+          <div className="glass-chip !px-3 !py-1.5 !text-[12px] text-[#1A6B3C]">
+            <ShieldCheck size={13} /> Active Proctored Session
           </div>
 
           {/* AWS Rekognition Face Verification Badge */}
           {faceVerified ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-semibold">
+            <div className="glass-chip !px-3 !py-1.5 !text-[12px] text-[#1A6B3C]">
               <CheckCircle2 size={13} />
               <span>✓ Face Verified ({faceSimilarity ? `${faceSimilarity}%` : 'Match'})</span>
             </div>
           ) : faceVerificationStatus === 'FAILED' ? (
             <button
               onClick={() => setShowVerificationModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/15 border border-red-500/40 text-red-400 text-[11px] font-semibold hover:bg-red-500/25 transition-colors cursor-pointer"
+              className="glass-chip !px-3 !py-1.5 !text-[12px] !bg-[rgba(254,226,226,0.8)] !border-[#FCA5A5] text-[#991B1B] hover:!bg-[rgba(254,226,226,1)] transition-colors cursor-pointer"
             >
               <XCircle size={13} />
               <span>✗ Verification Failed · Retry</span>
@@ -1081,46 +1094,47 @@ export default function CandidateSession() {
           ) : (
             <button
               onClick={() => setShowVerificationModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-semibold hover:bg-amber-500/25 transition-colors cursor-pointer animate-pulse"
+              className="glass-chip !px-3 !py-1.5 !text-[12px] !bg-[rgba(254,243,199,0.85)] !border-[#FDE68A] text-[#92400E] hover:!bg-[rgba(254,243,199,1)] transition-colors cursor-pointer animate-pulse"
             >
               <Camera size={13} />
               <span>Verify Face via Rekognition</span>
             </button>
           )}
 
-          <span className="text-sm font-medium text-gray-300 ml-2">{session.interview_type} Interview</span>
+          <span className="text-[15px] font-semibold text-[#141114] tracking-[-0.01em] ml-1.5">{session.interview_type} Interview</span>
         </div>
 
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-2 text-sm">
           <button
             onClick={toggleFullscreen}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1A1A1A] hover:bg-[#252525] text-xs font-medium text-gray-300 border border-[#333] transition-colors"
+            className="glass-btn !rounded-full px-3.5 py-2 text-[13px]"
             title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
           </button>
-          <div className="flex items-center gap-1.5 text-gray-400">
-            <Clock size={14} />
-            <span className="font-mono">{formatTime(elapsed)}</span>
+          <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/50 border border-white/90 text-[#4A464E] shadow-[inset_0_1px_0_#fff]">
+            <Clock size={14} className="text-[#A4123F]" />
+            <span className="font-mono text-[13px] font-semibold">{formatTime(elapsed)}</span>
           </div>
 
           <button
             onClick={() => setShowEndModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors cursor-pointer"
+            className="glass-btn-primary !rounded-full px-4 py-2 text-[13px] cursor-pointer"
             title="End Interview"
           >
             <LogOut size={14} />
             <span>End Interview</span>
           </button>
         </div>
+        </div>
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex gap-4 overflow-hidden p-4">
         {/* Left: Video Area */}
-        <div className="flex-1 relative flex flex-col p-4">
-          <div className="flex-1 bg-[#11131A] rounded-xl border border-[#1A1A1A] relative overflow-hidden flex items-center justify-center">
+        <div className="flex-1 min-w-0 relative flex flex-col glass-static liquid rounded-[30px] p-2.5">
+          <div className="flex-1 bg-[radial-gradient(120%_90%_at_50%_0%,#F7F5F3_0%,#E9E6E3_60%,#DFDBD7_100%)] rounded-[24px] relative overflow-hidden flex items-center justify-center shadow-[inset_0_1px_3px_rgba(20,14,18,0.08)]">
             {/* Interviewer Video */}
             {rtc.remoteStream ? (
               <video
@@ -1135,17 +1149,19 @@ export default function CandidateSession() {
               />
             ) : (
               <div className="text-center flex flex-col items-center">
-                <Loader2 size={32} className="animate-spin text-gray-500 mb-4" />
-                <p className="text-gray-400 text-sm">
+                <div className="glass-tile !w-16 !h-16 !rounded-[20px] mb-4">
+                  <Loader2 size={28} className="animate-spin text-[#A4123F]" />
+                </div>
+                <p className="text-[#55515A] text-[15px] font-medium">
                   {rtc.state === 'error' ? rtc.error : 'Waiting for interviewer to join...'}
                 </p>
               </div>
             )}
 
             {/* Self view PiP & Candidate Toolbar */}
-            <div className="absolute bottom-6 right-6 flex flex-col items-end gap-2">
+            <div className="absolute bottom-5 right-5 flex flex-col items-end gap-2.5">
               {!selfViewHidden && (
-                <div className="w-48 aspect-video bg-black rounded-lg border border-gray-700 overflow-hidden shadow-2xl relative">
+                <div className="w-60 aspect-video bg-black rounded-[16px] overflow-hidden relative shadow-[0_0_0_3px_rgba(255,255,255,0.85),0_18px_40px_-14px_rgba(0,0,0,0.7)]">
                   {localStream && (
                     <>
                       {camEnabled ? (
@@ -1160,8 +1176,8 @@ export default function CandidateSession() {
                           className="w-full h-full object-cover scale-x-[-1]"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-gray-400 text-[10px] gap-1">
-                          <VideoOff size={16} className="text-red-400" />
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-[#1E1B20] text-white/60 text-[11px] gap-1">
+                          <VideoOff size={16} className="text-[#F87171]" />
                           <span>Camera Off</span>
                         </div>
                       )}
@@ -1179,22 +1195,22 @@ export default function CandidateSession() {
 
                   {/* Status badges on PiP */}
                   {faceVerified ? (
-                    <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-emerald-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 size={9} /> ID VERIFIED
+                    <div className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-full bg-[#1A6B3C] text-white text-[9.5px] font-bold flex items-center gap-1 shadow-sm">
+                      <CheckCircle2 size={10} /> ID VERIFIED
                     </div>
                   ) : (
-                    <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1 shadow-sm">
-                      <Lock size={9} /> UNVERIFIED
+                    <div className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-full bg-[#B45309] text-white text-[9.5px] font-bold flex items-center gap-1 shadow-sm">
+                      <Lock size={10} /> UNVERIFIED
                     </div>
                   )}
 
                   {faceCount !== 1 && (
-                    <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-red-600/90 text-white text-[9px] font-bold flex items-center gap-1">
+                    <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full bg-[#991B1B] text-white text-[9.5px] font-bold flex items-center gap-1">
                       <Users size={10} /> {faceCount === 0 ? 'NO FACE' : `${faceCount} FACES`}
                     </div>
                   )}
                   {detectedItem && (
-                    <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-amber-600/90 text-white text-[9px] font-bold flex items-center gap-1">
+                    <div className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-full bg-[#B45309] text-white text-[9.5px] font-bold flex items-center gap-1">
                       <Smartphone size={10} /> {detectedItem.toUpperCase()}
                     </div>
                   )}
@@ -1202,45 +1218,45 @@ export default function CandidateSession() {
               )}
 
               {/* Floating Candidate Media Controls */}
-              <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 shadow-lg">
+              <div className="flex items-center gap-1.5 bg-[rgba(255,255,255,0.88)] px-2 py-1.5 rounded-full border border-white shadow-[0_12px_30px_-12px_rgba(0,0,0,0.55)]">
                 <button
                   type="button"
                   onClick={toggleCandidateMic}
                   title={micEnabled ? "Mute Microphone" : "Unmute Microphone"}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    micEnabled ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                    micEnabled ? 'bg-[rgba(20,17,20,0.05)] text-[#141114] hover:bg-[rgba(20,17,20,0.10)]' : 'bg-[#991B1B] text-white hover:bg-[#7F1D1D]'
                   }`}
                 >
-                  {micEnabled ? <Mic size={14} /> : <MicOff size={14} />}
+                  {micEnabled ? <Mic size={15} /> : <MicOff size={15} />}
                 </button>
                 <button
                   type="button"
                   onClick={toggleCandidateCam}
                   title={camEnabled ? "Turn Off Camera" : "Turn On Camera"}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    camEnabled ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                    camEnabled ? 'bg-[rgba(20,17,20,0.05)] text-[#141114] hover:bg-[rgba(20,17,20,0.10)]' : 'bg-[#991B1B] text-white hover:bg-[#7F1D1D]'
                   }`}
                 >
-                  {camEnabled ? <Video size={14} /> : <VideoOff size={14} />}
+                  {camEnabled ? <Video size={15} /> : <VideoOff size={15} />}
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelfViewHidden(!selfViewHidden)}
                   title={selfViewHidden ? "Show Self Video" : "Minimize / Hide Self Video"}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    selfViewHidden ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-white/10 text-white hover:bg-white/20'
+                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                    selfViewHidden ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-[rgba(20,17,20,0.05)] text-[#141114] hover:bg-[rgba(20,17,20,0.10)]'
                   }`}
                 >
-                  {selfViewHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {selfViewHidden ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
             </div>
 
             {/* Candidate Name overlay */}
-            <div className="absolute bottom-6 left-6 px-3 py-1.5 bg-black/60 backdrop-blur-sm rounded-md text-[13px] font-medium border border-white/10 flex items-center gap-2">
+            <div className="absolute bottom-5 left-5 px-3.5 py-2 bg-[rgba(255,255,255,0.88)] rounded-full text-[13px] font-semibold text-[#141114] border border-white shadow-[0_12px_30px_-12px_rgba(0,0,0,0.55)] flex items-center gap-2">
               <span>{session.candidate_name}</span>
               {reflectionAlert && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
                   Glare Detected
                 </span>
               )}
@@ -1249,11 +1265,11 @@ export default function CandidateSession() {
         </div>
 
         {/* Right: Code Editor with Monaco */}
-        <div className="w-[480px] border-l border-[#1A1A1A] bg-[#11131A] flex flex-col">
+        <div className="w-[520px] shrink-0 glass-static liquid rounded-[30px] overflow-hidden flex flex-col">
           {/* Editor Header */}
-          <div className="h-12 border-b border-[#1A1A1A] flex items-center justify-between px-3 bg-[#0E1017]">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
-              <Code2 size={15} className="text-blue-400" />
+          <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 text-[14px] font-semibold text-[#141114]">
+              <div className="glass-tile !w-9 !h-9 !rounded-[11px]"><Code2 size={16} className="text-[#A4123F]" /></div>
               <span>Workspace</span>
             </div>
 
@@ -1261,7 +1277,7 @@ export default function CandidateSession() {
               <select
                 value={selectedLang}
                 onChange={(e) => handleLanguageChange(e.target.value)}
-                className="bg-[#181A22] border border-[#2D313E] rounded-lg px-2.5 py-1 text-xs text-gray-200 outline-none cursor-pointer hover:border-gray-500 transition-colors"
+                className="glass-input !w-auto !py-1.5 !px-3 !text-[13px] !rounded-full font-medium cursor-pointer ![backdrop-filter:none] ![-webkit-backdrop-filter:none]"
               >
                 {Object.keys(LANGUAGE_TEMPLATES).map((lang) => (
                   <option key={lang} value={lang}>
@@ -1273,7 +1289,7 @@ export default function CandidateSession() {
               <button
                 onClick={handleRunCode}
                 disabled={isRunningCode || !faceVerified}
-                className="flex items-center gap-1.5 px-3 py-1 bg-[#1A6B3C] hover:bg-[#145530] text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-white text-[13px] font-semibold bg-gradient-to-b from-[#22874D] to-[#145530] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_18px_-8px_rgba(26,107,60,0.7)] hover:brightness-110 transition-all disabled:opacity-50 cursor-pointer active:scale-95"
                 title="Compile and Run Code"
               >
                 {isRunningCode ? (
@@ -1291,31 +1307,31 @@ export default function CandidateSession() {
 
               <button
                 onClick={() => setShowTerminal(!showTerminal)}
-                className={`p-1.5 rounded-lg border transition-colors flex items-center gap-1 text-xs ${
-                  showTerminal ? 'bg-blue-900/30 border-blue-500/50 text-blue-300' : 'bg-[#181A22] border-[#2D313E] text-gray-400 hover:text-white'
+                className={`glass-icon-btn !w-9 !h-9 !rounded-full gap-1 text-xs ${
+                  showTerminal ? '!text-[#A4123F] !bg-white' : ''
                 }`}
                 title="Toggle Terminal Output"
               >
-                <Terminal size={13} />
-                {codeOutput && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                <Terminal size={14} />
+                {codeOutput && <span className="w-1.5 h-1.5 rounded-full bg-[#1A6B3C]"></span>}
               </button>
             </div>
           </div>
 
           {/* Monaco Editor */}
-          <div className="flex-1 overflow-hidden relative">
+          <div className="flex-1 overflow-hidden relative mx-3 rounded-[20px] bg-white border border-[rgba(20,17,20,0.06)] shadow-[inset_0_1px_2px_rgba(20,14,18,0.04)]">
             {!faceVerified && (
-              <div className="absolute inset-0 z-20 bg-[#0A0A0A]/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-4 text-amber-400">
+              <div className="absolute inset-0 z-20 bg-[rgba(250,249,248,0.86)] backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+                <div className="glass-tile !w-14 !h-14 !rounded-[18px] text-[#A4123F] mb-4">
                   <Lock size={22} />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">Coding Workspace Locked</h3>
-                <p className="text-xs text-gray-400 max-w-xs mb-5 leading-relaxed">
+                <h3 className="text-[17px] font-bold text-[#141114] tracking-[-0.015em] mb-2">Coding Workspace Locked</h3>
+                <p className="text-[13px] text-[#67636C] max-w-xs mb-6 leading-relaxed">
                   Identity face verification via AWS Rekognition is required before you can access the code editor and interview questions.
                 </p>
                 <button
                   onClick={() => setShowVerificationModal(true)}
-                  className="px-5 py-2.5 bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-[#A4123F]/25 cursor-pointer"
+                  className="glass-btn-primary !rounded-full px-5 py-2.5 text-[13.5px] cursor-pointer"
                 >
                   <Camera size={14} /> Open Face Verification
                 </button>
@@ -1326,7 +1342,7 @@ export default function CandidateSession() {
               language={LANGUAGE_TEMPLATES[selectedLang].lang}
               value={editorCode}
               onChange={handleEditorCodeChange}
-              theme="vs-dark"
+              theme="light"
               onMount={(editor, monaco) => {
                 // Intercept and disable Paste Command
                 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, () => {
@@ -1390,74 +1406,74 @@ export default function CandidateSession() {
 
           {/* Collapsible Terminal Output Pane */}
           {showTerminal && (
-            <div className="h-48 border-t border-[#232736] bg-[#0A0C10] flex flex-col font-mono text-xs animate-fade-in shrink-0">
-              <div className="h-7 border-b border-[#1E232E] px-3 flex items-center justify-between bg-[#11141D] text-[11px] text-gray-400">
+            <div className="h-52 mx-3 mt-3 rounded-[18px] border border-[rgba(20,17,20,0.07)] bg-[rgba(255,255,255,0.7)] flex flex-col font-mono text-xs animate-fade-in shrink-0 overflow-hidden">
+              <div className="h-9 border-b border-[rgba(20,17,20,0.06)] px-3.5 flex items-center justify-between text-[11.5px] text-[#67636C]">
                 <div className="flex items-center gap-2">
-                  <Terminal size={12} className="text-emerald-400" />
-                  <span className="font-semibold text-gray-200">Terminal Output</span>
+                  <Terminal size={13} className="text-[#A4123F]" />
+                  <span className="font-semibold text-[#141114] font-sans">Terminal Output</span>
                   {codeOutput?.status && (
-                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                      codeOutput.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      codeOutput.status === 'SUCCESS' ? 'bg-[rgba(26,107,60,0.08)] text-[#1A6B3C] border border-[#1A6B3C]/25' : 'bg-[rgba(153,27,27,0.08)] text-[#991B1B] border border-[#991B1B]/25'
                     }`}>
                       {codeOutput.status}
                     </span>
                   )}
                   {codeOutput?.executionTime !== undefined && (
-                    <span className="text-[10px] text-gray-500">
+                    <span className="text-[10.5px] text-[#9A979E]">
                       ({codeOutput.executionTime}s)
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 font-sans">
                   <button
                     onClick={() => setCodeOutput(null)}
-                    className="text-gray-400 hover:text-white text-[10px] cursor-pointer"
+                    className="text-[#67636C] hover:text-[#A4123F] text-[11px] font-semibold px-2 py-0.5 rounded-full hover:bg-white cursor-pointer"
                   >
                     Clear
                   </button>
                   <button
                     onClick={() => setShowTerminal(false)}
-                    className="text-gray-400 hover:text-white cursor-pointer"
+                    className="text-[#67636C] hover:text-[#141114] cursor-pointer w-6 h-6 rounded-full hover:bg-white"
                   >
                     ✕
                   </button>
                 </div>
               </div>
 
-              <div className="flex-1 p-3 overflow-y-auto font-mono text-[12px] leading-relaxed select-text bg-[#090A0F]">
+              <div className="flex-1 p-3.5 overflow-y-auto font-mono text-[12.5px] leading-relaxed select-text">
                 {isRunningCode ? (
-                  <div className="flex items-center gap-2 text-gray-400 py-2">
-                    <Loader2 size={14} className="animate-spin text-emerald-400" />
+                  <div className="flex items-center gap-2 text-[#67636C] py-2">
+                    <Loader2 size={14} className="animate-spin text-[#A4123F]" />
                     <span>Compiling and executing code in sandbox...</span>
                   </div>
                 ) : codeOutput ? (
                   <div>
                     {codeOutput.stdout && (
-                      <pre className="text-emerald-300 whitespace-pre-wrap font-mono">{codeOutput.stdout}</pre>
+                      <pre className="text-[#145530] whitespace-pre-wrap font-mono">{codeOutput.stdout}</pre>
                     )}
                     {codeOutput.stderr && (
-                      <pre className="text-red-400 whitespace-pre-wrap mt-1 font-mono">{codeOutput.stderr}</pre>
+                      <pre className="text-[#991B1B] whitespace-pre-wrap mt-1 font-mono">{codeOutput.stderr}</pre>
                     )}
                     {!codeOutput.stdout && !codeOutput.stderr && (
-                      <span className="text-gray-500 italic">Program finished with no stdout output.</span>
+                      <span className="text-[#9A979E] italic">Program finished with no stdout output.</span>
                     )}
                   </div>
                 ) : (
-                  <span className="text-gray-500 italic">Click 'Run' to execute. Terminal output is mirrored to the interviewer in real-time.</span>
+                  <span className="text-[#9A979E] italic">Click 'Run' to execute. Terminal output is mirrored to the interviewer in real-time.</span>
                 )}
               </div>
             </div>
           )}
 
           {/* Telemetry Strip */}
-          <div className="h-10 border-t border-[#1A1A1A] bg-[#0A0A0A] flex items-center px-4 gap-4 text-[10px] font-mono text-gray-500 tracking-wider">
-            <div>GAZE Δ {gazeDelta.toFixed(3)}</div>
-            <div>rPPG MONITOR ACTIVE</div>
-            <div className="flex items-center gap-1">
-              <Users size={12} className={faceCount === 1 ? 'text-green-500' : 'text-red-500'} />
+          <div className="shrink-0 m-3 px-3 py-2 rounded-full glass-inset flex items-center gap-2 text-[10.5px] font-mono text-[#67636C] tracking-[0.06em]">
+            <div className="px-2.5 py-1 rounded-full bg-white/70">GAZE Δ {gazeDelta.toFixed(3)}</div>
+            <div className="px-2.5 py-1 rounded-full bg-white/70">rPPG MONITOR ACTIVE</div>
+            <div className="px-2.5 py-1 rounded-full bg-white/70 flex items-center gap-1">
+              <Users size={12} className={faceCount === 1 ? 'text-[#1A6B3C]' : 'text-[#991B1B]'} />
               <span>{faceCount} FACE</span>
             </div>
-            <div className="ml-auto text-green-700 font-semibold flex items-center gap-1">
+            <div className="ml-auto pr-1 text-[#1A6B3C] font-semibold flex items-center gap-1">
               <Monitor size={12} /> SECURE
             </div>
           </div>
@@ -1478,19 +1494,19 @@ export default function CandidateSession() {
 
       {/* ── AWS Rekognition Identity Verification Checkpoint Modal ── */}
       {showVerificationModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#12141C] border border-[#232736] rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col animate-fade-in">
+        <div className="fixed inset-0 z-50 bg-[#141114]/30 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-strong liquid !bg-[rgba(255,255,255,0.86)] rounded-[32px] max-w-3xl w-full overflow-hidden flex flex-col animate-fade-in">
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-[#232736] flex items-center justify-between bg-[#171A24]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#A4123F] flex items-center justify-center text-white">
-                  <ShieldCheck size={18} />
+            <div className="px-7 pt-6 pb-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="glass-tile-maroon !w-11 !h-11 !rounded-[13px] shrink-0">
+                  <ShieldCheck size={19} />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                    Identity Verification <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">AWS Rekognition</span>
+                  <h2 className="text-[17px] font-bold text-[#141114] tracking-[-0.015em] flex items-center gap-2">
+                    Identity Verification <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-[rgba(164,18,63,0.08)] text-[#A4123F] font-mono border border-[#A4123F]/20">AWS Rekognition</span>
                   </h2>
-                  <p className="text-[11px] text-gray-400">
+                  <p className="text-[13px] text-[#67636C]">
                     Compare your live video feed against your reference photograph to unlock the interview.
                   </p>
                 </div>
@@ -1499,7 +1515,7 @@ export default function CandidateSession() {
               {faceVerified && (
                 <button
                   onClick={() => setShowVerificationModal(false)}
-                  className="text-gray-400 hover:text-white text-xs px-2 py-1 rounded bg-[#232736] hover:bg-[#2F3447] transition-colors"
+                  className="glass-btn !rounded-full px-3.5 py-2 text-[12.5px]"
                 >
                   Close
                 </button>
@@ -1507,23 +1523,23 @@ export default function CandidateSession() {
             </div>
 
             {/* Modal Body: Two Column Comparison */}
-            <div className="p-6 flex flex-col gap-6">
+            <div className="px-7 pb-7 pt-2 flex flex-col gap-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                 {/* 1. Stored Reference Photograph */}
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-xs font-semibold text-gray-300">
+                  <div className="flex items-center justify-between text-[13px] font-semibold text-[#2A262C]">
                     <span>1. Reference Photograph</span>
                     <button
                       onClick={() => reuploadInputRef.current?.click()}
-                      className="text-[11px] text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 cursor-pointer"
+                      className="text-[12px] text-[#A4123F] hover:underline transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       <RefreshCw size={11} className={reuploading ? 'animate-spin' : ''} />
                       <span>{referenceImageUrl ? 'Replace Photo' : 'Upload Photo'}</span>
                     </button>
                   </div>
 
-                  <div className="aspect-[4/3] rounded-xl bg-[#0A0B0E] border border-[#232736] overflow-hidden relative flex items-center justify-center">
+                  <div className="aspect-[4/3] rounded-[20px] glass-inset overflow-hidden relative flex items-center justify-center">
                     {referenceImageUrl ? (
                       <img
                         src={referenceImageUrl}
@@ -1533,30 +1549,30 @@ export default function CandidateSession() {
                     ) : (
                       <div
                         onClick={() => reuploadInputRef.current?.click()}
-                        className="flex flex-col items-center justify-center p-4 text-center cursor-pointer hover:bg-[#151822] transition-colors w-full h-full"
+                        className="flex flex-col items-center justify-center p-4 text-center cursor-pointer hover:bg-white/60 transition-colors w-full h-full"
                       >
-                        <UploadCloud size={28} className="text-gray-500 mb-2" />
-                        <p className="text-xs font-medium text-gray-300">No reference photo uploaded</p>
-                        <p className="text-[10px] text-gray-500 mt-1">Click to upload identity photo</p>
+                        <UploadCloud size={28} className="text-[#A4123F] mb-2" />
+                        <p className="text-[13px] font-semibold text-[#141114]">No reference photo uploaded</p>
+                        <p className="text-[11.5px] text-[#85818A] mt-1">Click to upload identity photo</p>
                       </div>
                     )}
-                    <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-xs text-[10px] font-medium text-gray-300 border border-white/10">
+                    <div className="absolute bottom-2.5 left-2.5 px-2.5 py-1 rounded-full bg-white/90 text-[10.5px] font-semibold text-[#4A464E] border border-white shadow-sm">
                       Source Image (ID)
                     </div>
                   </div>
                   {reuploadError && (
-                    <p className="text-[11px] text-red-400 mt-0.5">{reuploadError}</p>
+                    <p className="text-[12px] text-[#991B1B] mt-0.5">{reuploadError}</p>
                   )}
                 </div>
 
                 {/* 2. Live Webcam Target Feed */}
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-xs font-semibold text-gray-300">
+                  <div className="flex items-center justify-between text-[13px] font-semibold text-[#2A262C]">
                     <span>2. Live Interview Snapshot</span>
-                    <span className="text-[11px] font-mono text-gray-400">Target Image</span>
+                    <span className="text-[11.5px] font-mono text-[#85818A]">Target Image</span>
                   </div>
 
-                  <div className="aspect-[4/3] rounded-xl bg-black border border-[#232736] overflow-hidden relative flex items-center justify-center">
+                  <div className="aspect-[4/3] rounded-[20px] bg-[#141114] overflow-hidden relative flex items-center justify-center shadow-[0_14px_30px_-16px_rgba(20,14,18,0.6)]">
                     {localStream ? (
                       <>
                         <video
@@ -1578,21 +1594,21 @@ export default function CandidateSession() {
                         </div>
                       </>
                     ) : (
-                      <div className="flex flex-col items-center justify-center text-gray-500">
+                      <div className="flex flex-col items-center justify-center text-white/55">
                         <Loader2 size={24} className="animate-spin mb-2" />
-                        <span className="text-xs">Initializing camera...</span>
+                        <span className="text-[12px]">Initializing camera...</span>
                       </div>
                     )}
 
                     {/* Live status pill */}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-xs text-[10px] font-medium border border-white/10 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-white/90 text-[10.5px] font-semibold text-[#141114] border border-white flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
                       <span>Live Video</span>
                     </div>
 
-                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-xs text-[10px] font-semibold border border-white/10 flex items-center gap-1">
-                      <Users size={10} className={faceCount === 1 ? 'text-emerald-400' : 'text-red-400'} />
-                      <span className={faceCount === 1 ? 'text-emerald-300' : 'text-red-300'}>
+                    <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-full bg-white/90 text-[10.5px] font-semibold border border-white flex items-center gap-1">
+                      <Users size={10} className={faceCount === 1 ? 'text-[#1A6B3C]' : 'text-[#991B1B]'} />
+                      <span className={faceCount === 1 ? 'text-[#1A6B3C]' : 'text-[#991B1B]'}>
                         {faceCount === 0 ? 'No Face Detected' : faceCount === 1 ? '1 Face Positioned' : `${faceCount} Faces Detected`}
                       </span>
                     </div>
@@ -1603,10 +1619,10 @@ export default function CandidateSession() {
 
               {/* Status & Feedback Banner */}
               {isVerifying && (
-                <div className="p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/30 flex items-center gap-3 text-purple-200 text-xs animate-pulse">
-                  <Loader2 size={18} className="animate-spin text-purple-400 shrink-0" />
+                <div className="px-4 py-3.5 rounded-[18px] bg-[rgba(164,18,63,0.06)] border border-[#A4123F]/20 flex items-center gap-3 text-[#4A464E] text-[13px] animate-pulse">
+                  <Loader2 size={18} className="animate-spin text-[#A4123F] shrink-0" />
                   <div>
-                    <span className="font-semibold block">Calling AWS Rekognition CompareFaces...</span>
+                    <span className="font-semibold text-[#141114] block">Calling AWS Rekognition CompareFaces...</span>
                     Extracting facial landmarks and computing identity similarity score.
                   </div>
                 </div>
@@ -1614,16 +1630,16 @@ export default function CandidateSession() {
 
               {/* SUCCESS RESULT */}
               {faceVerified && (
-                <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-start gap-3 text-emerald-200 animate-fade-in">
-                  <CheckCircle2 size={20} className="text-emerald-400 shrink-0 mt-0.5" />
-                  <div className="flex-1 text-xs">
-                    <span className="font-bold text-emerald-300 text-sm block mb-0.5">
+                <div className="px-4 py-4 rounded-[18px] bg-[rgba(230,244,237,0.8)] border border-[#B7E1CD] flex items-start gap-3 text-[#145530] animate-fade-in">
+                  <CheckCircle2 size={20} className="text-[#1A6B3C] shrink-0 mt-0.5" />
+                  <div className="flex-1 text-[13px]">
+                    <span className="font-bold text-[#145530] text-[14.5px] block mb-0.5">
                       ✓ Face Verification Successful
                     </span>
-                    <p className="text-emerald-200/90 leading-relaxed">
-                      AWS Rekognition confirmed candidate identity match with <strong className="font-bold text-emerald-300">{faceSimilarity}%</strong> similarity score.
+                    <p className="text-[#1A6B3C] leading-relaxed">
+                      AWS Rekognition confirmed candidate identity match with <strong className="font-bold">{faceSimilarity}%</strong> similarity score.
                     </p>
-                    <p className="text-[11px] text-emerald-400/80 mt-1">
+                    <p className="text-[12px] text-[#1A6B3C]/80 mt-1">
                       Workspace unlocked. You may now proceed with your coding interview.
                     </p>
                   </div>
@@ -1632,19 +1648,19 @@ export default function CandidateSession() {
 
               {/* FAILURE RESULT */}
               {!isVerifying && faceVerificationStatus === 'FAILED' && (
-                <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/40 flex items-start gap-3 text-red-200 animate-fade-in">
-                  <XCircle size={20} className="text-red-400 shrink-0 mt-0.5" />
-                  <div className="flex-1 text-xs">
-                    <span className="font-bold text-red-300 text-sm block mb-0.5">
+                <div className="px-4 py-4 rounded-[18px] bg-[rgba(254,226,226,0.75)] border border-[#FCA5A5] flex items-start gap-3 text-[#7F1D1D] animate-fade-in">
+                  <XCircle size={20} className="text-[#991B1B] shrink-0 mt-0.5" />
+                  <div className="flex-1 text-[13px]">
+                    <span className="font-bold text-[#991B1B] text-[14.5px] block mb-0.5">
                       ✗ Face Verification Failed
                     </span>
-                    <p className="text-red-200/90 leading-relaxed">
+                    <p className="leading-relaxed">
                       The live candidate does not appear to match the uploaded reference photograph.
                       {faceSimilarity !== null && (
                         <span> (Similarity score: <strong className="font-semibold">{faceSimilarity}%</strong>, required: 80.0%)</span>
                       )}
                     </p>
-                    <p className="text-[11px] text-red-300/80 mt-1">
+                    <p className="text-[12px] text-[#991B1B]/80 mt-1">
                       Access is blocked until verification succeeds. Please ensure good lighting, align your face inside the guide frame, or re-upload a clearer reference photograph.
                     </p>
                   </div>
@@ -1653,23 +1669,23 @@ export default function CandidateSession() {
 
               {/* ERROR RESULT */}
               {!isVerifying && faceVerificationStatus === 'ERROR' && verificationError && (
-                <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 flex items-start gap-3 text-amber-200 text-xs animate-fade-in">
-                  <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <div className="px-4 py-3.5 rounded-[18px] bg-[rgba(254,243,199,0.8)] border border-[#FDE68A] flex items-start gap-3 text-[#92400E] text-[13px] animate-fade-in">
+                  <AlertTriangle size={18} className="text-[#D97706] shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <span className="font-semibold text-amber-300 block mb-0.5">Verification Error</span>
+                    <span className="font-semibold block mb-0.5">Verification Error</span>
                     {verificationError}
                   </div>
                 </div>
               )}
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-3 pt-1">
                 {!faceVerified ? (
                   <>
                     <button
                       type="button"
                       onClick={() => reuploadInputRef.current?.click()}
-                      className="px-4 py-2.5 rounded-xl border border-[#333748] text-xs font-semibold text-gray-300 hover:bg-[#1D212E] hover:text-white transition-colors cursor-pointer"
+                      className="glass-btn !rounded-full px-5 py-2.5 text-[13.5px] cursor-pointer"
                     >
                       Re-upload Photo
                     </button>
@@ -1677,7 +1693,7 @@ export default function CandidateSession() {
                       type="button"
                       onClick={triggerFaceVerification}
                       disabled={isVerifying || !localStream || !referenceImageUrl}
-                      className="px-6 py-2.5 rounded-xl bg-[#A4123F] hover:bg-[#850E32] disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold text-white transition-all shadow-lg shadow-[#A4123F]/30 flex items-center gap-2 cursor-pointer"
+                      className="glass-btn-primary !rounded-full px-6 py-2.5 text-[13.5px] cursor-pointer"
                     >
                       {isVerifying ? (
                         <>
@@ -1696,7 +1712,7 @@ export default function CandidateSession() {
                   <button
                     type="button"
                     onClick={() => setShowVerificationModal(false)}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white transition-colors cursor-pointer flex items-center gap-2"
+                    className="px-6 py-2.5 rounded-full text-white text-[13.5px] font-semibold bg-gradient-to-b from-[#22874D] to-[#145530] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_10px_22px_-10px_rgba(26,107,60,0.75)] hover:brightness-110 transition-all cursor-pointer flex items-center gap-2"
                   >
                     <CheckCircle2 size={14} />
                     <span>Enter Workspace</span>
@@ -1711,19 +1727,19 @@ export default function CandidateSession() {
 
       {/* End Interview Confirmation Modal */}
       {showEndModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#16181F] border border-gray-800 rounded-2xl p-6 shadow-2xl animate-fade-in text-white">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 bg-[#141114]/30 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md glass-strong liquid !bg-[rgba(255,255,255,0.86)] rounded-[32px] p-8 animate-fade-in text-[#141114]">
+            <div className="flex items-center gap-3.5 mb-5">
+              <div className="glass-tile !w-12 !h-12 !rounded-[15px] text-[#991B1B]">
                 <LogOut size={20} />
               </div>
               <div>
-                <h3 className="text-base font-bold">Conclude & Submit Interview?</h3>
-                <p className="text-xs text-gray-400">This action will finalize your session</p>
+                <h3 className="text-[18px] font-bold tracking-[-0.02em]">Conclude & Submit Interview?</h3>
+                <p className="text-[12.5px] text-[#67636C]">This action will finalize your session</p>
               </div>
             </div>
 
-            <p className="text-xs text-gray-300 mb-6 leading-relaxed">
+            <p className="text-[14px] text-[#55515A] mb-7 leading-relaxed">
               Are you sure you want to end your interview? Your camera feed, code submissions, and identity verification logs will be saved and finalized for review.
             </p>
 
@@ -1732,7 +1748,7 @@ export default function CandidateSession() {
                 type="button"
                 onClick={() => setShowEndModal(false)}
                 disabled={endingSession}
-                className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-300 transition-colors cursor-pointer"
+                className="glass-btn !rounded-full px-5 py-2.5 text-[13.5px] cursor-pointer"
               >
                 Cancel
               </button>
@@ -1740,7 +1756,7 @@ export default function CandidateSession() {
                 type="button"
                 onClick={handleEndInterview}
                 disabled={endingSession}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-600/20"
+                className="glass-btn-primary !rounded-full px-5 py-2.5 text-[13.5px] cursor-pointer"
               >
                 {endingSession ? (
                   <>
@@ -1761,26 +1777,26 @@ export default function CandidateSession() {
 
       {/* ── Mid-Stream Virtual Camera / OBS Security Blocker Modal ── */}
       {virtualCamBlocked && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-[#141416] border-2 border-red-600 rounded-3xl max-w-lg w-full p-8 text-center shadow-2xl shadow-red-950/80 flex flex-col items-center">
-            <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-4 text-red-500">
-              <Camera size={32} />
+        <div className="fixed inset-0 z-50 bg-[rgba(244,243,241,0.85)] backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in">
+          <div className="glass-strong liquid !bg-[rgba(255,255,255,0.88)] rounded-[36px] max-w-lg w-full p-9 text-center flex flex-col items-center ring-1 ring-[#991B1B]/25">
+            <div className="glass-tile !w-16 !h-16 !rounded-[20px] text-[#991B1B] mb-5">
+              <Camera size={28} />
             </div>
 
-            <h2 className="text-xl font-bold text-white mb-2">
+            <h2 className="text-[22px] font-bold text-[#141114] tracking-[-0.025em] mb-3">
               Unauthorized Video Source Detected
             </h2>
 
-            <p className="text-xs text-red-400 font-semibold mb-4 bg-red-950/40 border border-red-900/60 px-3 py-1.5 rounded-xl font-mono">
+            <p className="text-[12.5px] text-[#991B1B] font-semibold mb-4 bg-[rgba(254,226,226,0.8)] border border-[#FCA5A5] px-3.5 py-1.5 rounded-full font-mono">
               Prohibited: {virtualCamName || 'OBS / Virtual Camera'}
             </p>
 
-            <p className="text-xs text-gray-300 mb-6 leading-relaxed">
+            <p className="text-[13.5px] text-[#55515A] mb-6 leading-relaxed">
               DeepVerify zero-trust proctoring requires direct raw sensor access for PRNU hardware fingerprinting and biological liveness. Virtual cameras, OBS loopbacks, and synthetic software feeds are strictly prohibited.
             </p>
 
             <div className="w-full space-y-3 mb-6">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-left">
+              <p className="glass-label !text-[10.5px] text-left">
                 Available Physical Webcams
               </p>
               {physicalDevices.length > 0 ? (
@@ -1790,15 +1806,15 @@ export default function CandidateSession() {
                       key={dev.deviceId}
                       onClick={() => handleSelectPhysicalCamera(dev.deviceId)}
                       disabled={switchingCam}
-                      className="w-full p-3 rounded-xl bg-[#1E2026] hover:bg-[#282B34] border border-[#30333E] text-white text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer"
+                      className="w-full px-4 py-3 rounded-[16px] glass-btn !justify-between text-[13px] cursor-pointer"
                     >
                       <span className="truncate">{dev.label || 'Physical Webcam'}</span>
-                      <Check size={14} className="text-emerald-400 shrink-0" />
+                      <Check size={14} className="text-[#1A6B3C] shrink-0" />
                     </button>
                   ))}
                 </div>
               ) : (
-                <div className="p-4 rounded-xl bg-black/40 border border-gray-800 text-gray-400 text-xs">
+                <div className="px-4 py-4 rounded-[16px] glass-inset text-[#67636C] text-[13px]">
                   No physical webcam detected. Please plug in or enable your physical camera hardware.
                 </div>
               )}
@@ -1807,7 +1823,7 @@ export default function CandidateSession() {
             <button
               onClick={() => handleSelectPhysicalCamera()}
               disabled={switchingCam}
-              className="w-full py-3 bg-[#A4123F] hover:bg-[#850E32] text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-[#A4123F]/30 flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full glass-btn-primary !rounded-full py-3.5 text-[14px] cursor-pointer"
             >
               {switchingCam ? (
                 <>
