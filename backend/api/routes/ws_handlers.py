@@ -166,11 +166,17 @@ async def revert_anomaly_penalty(session_id: str, alert_id: str, alert_doc: Opti
     elif "VIRTUAL" in alert_type or "OBS" in alert_type:
         telemetry["virtual_camera_detected"] = False
 
-    # Excusing a failed/skipped liveness check removes its trust-score penalty
-    if module_name == "LIVENESS" or alert_type in ("LIVENESS_FAIL", "LIVENESS_SKIPPED"):
+    # Excusing a failed/skipped liveness check removes its trust-score penalty.
+    # Not on demo pages: they keep Naren's original behaviour (penalty stays).
+    _is_demo = False
+    try:
+        from api.routes.frames import _session_analyzers
+        _is_demo = bool(_session_analyzers.get(session_id, {}).get("is_demo"))
+    except Exception:
+        pass
+    if not _is_demo and (module_name == "LIVENESS" or alert_type in ("LIVENESS_FAIL", "LIVENESS_SKIPPED")):
         telemetry["liveness_failed"] = False
         try:
-            from api.routes.frames import _session_analyzers
             if session_id in _session_analyzers:
                 _session_analyzers[session_id]["liveness_failed"] = False
         except Exception:

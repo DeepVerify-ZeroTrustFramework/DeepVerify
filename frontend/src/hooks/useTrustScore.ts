@@ -66,7 +66,10 @@ export interface CodeSyncState {
   seq?: number
 }
 
-export function useTrustScore(sessionId: string) {
+// options.reconnect: interviews only. The demo page calls useTrustScore(id)
+// without options and gets Naren's original behaviour (one connection, 30 s ping).
+export function useTrustScore(sessionId: string, options?: { reconnect?: boolean }) {
+  const reconnectEnabled = !!options?.reconnect
   const [score, setScore] = useState(0)
   // Demo uploads: true when the file has no measurable camera fingerprint
   const [inconclusive, setInconclusive] = useState(false)
@@ -120,7 +123,7 @@ export function useTrustScore(sessionId: string) {
     }
     ws.onclose = (e) => {
       if (wsRef.current === ws) wsRef.current = null
-      if (closed) return
+      if (closed || !reconnectEnabled) return
       const delay = Math.min(10000, 500 * 2 ** retry++)
       console.warn(`[Dashboard] Disconnected (code ${e.code}) - reconnecting in ${delay}ms`)
       retryTimer = setTimeout(connect, delay)
@@ -250,7 +253,7 @@ export function useTrustScore(sessionId: string) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }))
       }
-    }, 20000)
+    }, reconnectEnabled ? 20000 : 30000)
 
     return () => {
       closed = true
@@ -259,7 +262,7 @@ export function useTrustScore(sessionId: string) {
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [sessionId])
+  }, [sessionId, reconnectEnabled])
 
   const acknowledgeAlert = (alertId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

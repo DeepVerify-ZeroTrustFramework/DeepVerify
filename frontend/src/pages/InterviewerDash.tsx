@@ -88,7 +88,7 @@ export default function InterviewerDash() {
   }
 
   // Initialize WebSockets for dashboard data (including live codeSync & score reversion)
-  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert } = useTrustScore(sessionId || '')
+  const { score, breakdown, raw, alerts, status: wsStatus, codeSync: wsCodeSync, acknowledgeAlert } = useTrustScore(sessionId || '', { reconnect: true })
 
   // Code arriving peer-to-peer over the WebRTC data channel (fastest path).
   // Whichever copy (P2P or WebSocket) has the higher seq wins.
