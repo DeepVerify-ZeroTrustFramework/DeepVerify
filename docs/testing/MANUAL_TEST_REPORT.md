@@ -1,0 +1,58 @@
+# DeepVerify — Manual Test Report (executed)
+
+| | |
+|---|---|
+| Date | 2026-11-15 |
+| Cases | 32 (29 Pass, 2 Fail, 1 Blocked) |
+| How executed | Real frontend + real backend driven by **Playwright in Google Chrome 153** (automated browser, not clicked by hand). Backend used in-memory MongoDB/Redis (Docker not available). Scripts: `backend/qa_tests/browser_exec/`. |
+| Evidence | `manual_evidence/` (screenshots; faces cropped out) and the CSV [MANUAL_TEST_RESULTS.csv](MANUAL_TEST_RESULTS.csv) |
+
+## What is simulated (read this before quoting results)
+- **Camera:** a synthetic webcam (canvas feed of a test portrait with a fixed sensor-noise pattern and a 72 bpm pulse), not a physical webcam. Results about PRNU/rPPG scores show the pipeline reacts correctly to such a feed; a real webcam may score differently.
+- **Face verification:** no AWS keys, so the app's local simulation mode ran (see DL-14).
+- **Tab switching:** a simulated `visibilitychange` event; fullscreen exit via `document.exitFullscreen()`.
+- Not done: Firefox/Edge, a physical webcam or microphone, Docker/cloud, WebRTC across two machines.
+
+## Results
+| ID | Title | Sev | Result | Actual result | Evidence |
+|---|---|---|---|---|---|
+| MT-01 | Recruiter sign-up | H | **Pass** | Signed up recruiter1@test.com; landed on /recruiter/dashboard (shows 'Good evening, Rita'). | manual_evidence/MT-01.png |
+| MT-02 | Candidate sign-up | H | **Pass** | Signed up candidate1@test.com with a clear face photo; landed on /student/inbox with profile and 'Ground Truth Enrolled'. | (not attached: shows a face) |
+| MT-03 | Wrong password | M | **Pass** | Stayed on login; message 'Invalid email or password.' | manual_evidence/MT-03.png |
+| MT-04 | Duplicate email | M | **Pass** | Sign-up refused; message 'An account with this email address already exists.' Side finding: company/role of 1 character gives '[object Object],[object Object]' instead of a readable error (DL-11). | manual_evidence/MT-04.png, MT-04_validation_bug.png |
+| MT-05 | Photo with no face / two faces | M | **Pass** | No-face photo: 'No face was detected in the photograph. Please upload a clear portrait.' Two-face photo: 'Multiple faces (3) detected…' (Haar counted a false third face). Both rejected. | manual_evidence/MT-05a.png, MT-05b.png |
+| MT-06 | Protected pages | H | **Pass** | Logged-out visit to /recruiter/dashboard redirected to /auth/recruiter/login; no data shown. | manual_evidence/MT-06.png |
+| MT-07 | Create a session | H | **Pass** | Real flow is Candidates > Invite to Interview (role, duration). Invitation DV-2025-4382 created; candidate gets a /check/<token> link in the inbox ('Start System Check & Join'); recruiter gets 'Enter Forensic Dashboard' (/dashboard/<id>) under Invitations. Links are not shown at creation time, as the script assumed. | manual_evidence/MT-07a.png, MT-07b.png |
+| MT-08 | Invalid link | M | **Pass** | /check/abc123 shows 'Access Denied - Invalid or expired session link.'; no JavaScript errors. | manual_evidence/MT-08.png |
+| MT-09 | Camera allowed | H | **Pass** | Camera allowed: live preview (640x480) shown, step 1 completed and moved to step 2 (synthetic camera). Real webcam not tested. | manual_evidence/MT-09.png |
+| MT-10 | Camera blocked | H | **Pass** | Camera present but permission blocked (NotAllowedError): stayed on step 1, heading 'Camera / Microphone Permission Denied', 3 troubleshooting steps, 'Retry Access'; no JS errors. With no camera at all: 'Camera Device Not Found'. | manual_evidence/MT-10.png |
+| MT-11 | Network check | M | **Pass** | 'Run Diagnostics' finished in about 1 s and moved to step 3. It pings the app's own /api/ping once; RTT is not visible (auto-advance) and no STUN/TURN is measured although the text says so (DL-13). | manual_evidence/MT-11.png |
+| MT-12 | PRNU calibration | H | **Pass** | 'Start Calibration' captured 30 frames in about 6 s and moved to step 4; server accepted the enrolment (synthetic camera). | (no usable image) |
+| MT-13 | Heart-rate baseline | M | **Pass** | Step completed and showed 64-72 BPM. BUT the value is simulated: with the camera covered (black) the identical sequence 71,72,69,65,64... appears; code uses a sine wave 68+/-4 (DL-12). | manual_evidence/MT-13_step4.png, MT-13_covered.png |
+| MT-14 | Reference photo | M | **Pass** | No-face photo refused ('No face was detected…'), Confirm button disabled; clear face photo accepted ('Face Validated'). | manual_evidence/MT-14a.png |
+| MT-15 | Consent wording | H | **Pass** | 'i consent' keeps 'Accept & Continue' disabled; 'I CONSENT' enables it and moves to step 8. | manual_evidence/MT-15a.png |
+| MT-16 | Finish check | H | **Pass** | 'Begin interview' moved to /session/<token>. (Screenshot is from the Chrome built-in fake camera, which the app correctly blocks as an 'Unauthorized Video Source'.) | manual_evidence/MT-16.png |
+| MT-17 | Fullscreen | M | **Pass** | Exiting fullscreen shows the 'Full Screen Required' gate and 'Exited Fullscreen mode - integrity warning logged.' (exit triggered with document.exitFullscreen(), not the Esc key). | (text log) |
+| MT-18 | Tab switching | H | **Pass** | 3 simulated tab switches: candidate toast each time; recruiter alerts TAB SWITCH #1 MEDIUM, #2 MEDIUM, #3 HIGH. (visibilitychange event simulated; headless Chrome cannot hide a tab.) | manual_evidence/MT-18_score_and_alerts.png |
+| MT-19 | Copy-paste block | H | **Pass** | Ctrl+V blocked ('Paste shortcut (Ctrl+V) is disabled.'), nothing inserted; right-click blocked ('Right-click context menu is disabled.'). Recruiter saw CLIPBOARD VIOLATION (MEDIUM) and CONTEXT MENU BLOCKED (INFO). | (text log) |
+| MT-20 | Code editor and run | H | **Pass** | print(2+3) gave output 5 (SUCCESS, 0.04 s) for the candidate after 1.54 s and for the recruiter after 1.62 s - in sync. | (text log) |
+| MT-21 | Camera covered | H | **Pass** | Trust fell 93 > 69 > 44 > 31 (CRITICAL ALERT) within 30 s; alerts RPPG LIVENESS FAIL (CRITICAL), PRNU IDENTITY FRAUD (HIGH), CANDIDATE ABSENCE (HIGH). | manual_evidence/MT-21_score_and_alerts.png |
+| MT-22 | Second person | M | **Pass** | Two faces in frame: candidate badge '2 FACES'; recruiter got MULTI FACE DETECTED (CRITICAL) 'Multiple faces detected (2 people visible)'. Note: score barely moved (84 > 79) despite the CRITICAL alert (DL-20). | manual_evidence/MT-22_score_and_alerts.png |
+| MT-23 | Page refresh | M | **Pass** | After refresh the candidate rejoined the same session (still 'ID VERIFIED', fullscreen gate shown again); recruiter kept receiving data (score 82 Verified). | (text log) |
+| MT-24 | Live trust score | H | **Pass** | Genuine synthetic camera: score 85, 79, 74, 89, 96, 98, 100, 100 over 40 s (Verified after about 20 s; first readings 74-79 = Caution). Modules 30/30/25/15. | manual_evidence/MT-24_score_and_alerts.png |
+| MT-25 | Alert feed | H | **Pass** | 18 alerts, 0 duplicates, newest first, each with severity, time and value. | manual_evidence/MT-22_score_and_alerts.png |
+| MT-26 | Flag session | M | **Fail** | Clicking 'Flag Session' does nothing: the button has no click handler (backend FLAG_SESSION exists but is never called); PDF still says 'Flagged for review: No' (DL-15). | (text log) |
+| MT-27 | End session and PDF | H | **Pass** | End Session > confirm > summary page (score 79, 8 events); PDF downloaded (DeepVerify_Report_<candidate>_<session>.pdf) with candidate, email, score history chart, module breakdown and alert log. Side finding: candidate screen was not told the session ended (DL-16). | manual_evidence/MT-27_end.png |
+| MT-28 | Reload dashboard | M | **Pass** | After reload: 18 alerts before and after, score 86 shown again. Side finding: 'ID Pending/Unverified' badge does not update live, only after reload (DL-17). | (text log) |
+| MT-29 | Live webcam (demo) | H | **Pass** | Genuine synthetic webcam: score 100, 100, 93, 86, 85, 87, 87, 89, 90, 87 (Verified, no alerts) (synthetic camera). | manual_evidence/MT-29_demo_score_panel.png |
+| MT-30 | Injected video (slide scenario) | H | **Fail** | Pre-recorded video after enrolling a genuine camera: PRNU 0/30, HIGH 'IDENTITY FRAUD - replayed recording or injected video' alert, so the fraud IS detected. But score was 58 at 5 s then 62-66 (CAUTION, 63 at 70 s), alert HIGH not CRITICAL: the slide's 'Trust Score 57 + Critical Alert' was not reproduced. (Virtual-camera name 'fake_device_0' in a live interview gave CRITICAL alerts and score 0.) | manual_evidence/MT-30_demo_score_panel.png |
+| MT-31 | Other browsers | M | **Blocked** | Only Chrome available; Firefox download blocked in the test environment; Edge not installed. | - |
+| MT-32 | Small window | L | **Pass** | 375 px and 320 px: login, sign-up and recruiter dashboard fit. At 320 px the demo page scrolls sideways by 33 px (chip row cut off) - cosmetic (DL-18). | manual_evidence/mobile_sheet.png |
+
+## Failed and blocked
+- **MT-26 Fail** — Flag Session button does nothing (DL-15).
+- **MT-30 Fail** — injected video is detected (PRNU 0, HIGH alert) but the score settled at about 63 (Caution), not 57 / Critical as on the slide.
+- **MT-31 Blocked** — only Chrome was available.
+
+## New defects found (see DEFECT_LOG.md DL-11 … DL-20)
+Validation errors shown as `[object Object]`; simulated heart-rate and gaze steps in the system check; fixed 94.8 % face match in simulation mode; inert Flag button; candidate not notified when the session ends; stale ID badge; hard-coded API key in the frontend source.

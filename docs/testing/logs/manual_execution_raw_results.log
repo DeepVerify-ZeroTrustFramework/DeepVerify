@@ -1,0 +1,890 @@
+=== secAB.json ===
+{
+ "MT-01": {
+  "result": "Pass",
+  "note": "Signed up recruiter1@test.com; landed on /recruiter/dashboard",
+  "shot": "MT-01.png"
+ },
+ "MT-04": {
+  "result": "Pass",
+  "note": "Stayed on sign-up; message: ['An account with this email address already exists.']",
+  "shot": "MT-04.png"
+ },
+ "MT-05": {
+  "result": "Pass",
+  "note": "No-face photo -> ['No face was detected in the photograph. Please upload a clear portrait.']; two-face photo -> ['Multiple faces (3) detected. Please upload an image with only yourself.']",
+  "shot": "MT-05a.png, MT-05b.png"
+ },
+ "MT-02": {
+  "result": "Pass",
+  "note": "Signed up candidate1@test.com with face photo; landed on /student/inbox",
+  "shot": "MT-02.png"
+ }
+}
+=== secC.json ===
+{
+ "MT-08": {
+  "result": "Pass",
+  "note": "/check/abc123 -> /check/abc123; page text: Access Denied /  / Invalid or expired session link.; JS errors: 0",
+  "shot": "MT-08.png"
+ },
+ "MT-10": {
+  "result": "Pass",
+  "note": "Camera exists but browser permission blocked (getUserMedia -> NotAllowedError). Page stayed on step 1 with the heading 'Camera / Microphone Permission Denied', 3 troubleshooting steps and a 'Retry Access' button; no JS errors; cannot continue. (A separate run with no camera at all shows 'Camera Device Not Found'.)",
+  "shot": "MT-10.png"
+ },
+ "MT-09": {
+  "result": "Pass",
+  "note": "Camera allowed: 1 live video element(s), resolution 640x480 (Chrome synthetic camera); moved to step 2",
+  "shot": "MT-09.png"
+ },
+ "MT-11": {
+  "result": "Pass",
+  "note": "'Run Diagnostics' finished in about 1 s and moved on to step 3. Code review: it pings the app's own /api/ping once and labels the link fiber/wifi/cellular by RTT; the RTT value is not visible because the step auto-advances; the screen text says 'STUN/TURN latencies' but no STUN/TURN is measured (DL-13, Low).",
+  "shot": "MT-11.png"
+ },
+ "MT-12": {
+  "result": "Pass",
+  "note": "'Start Calibration' captured 30 frames and finished in 5.7s; moved to step 4 (server accepted /api/enroll)",
+  "shot": "MT-12.png"
+ },
+ "MT-13": {
+  "result": "Pass",
+  "note": "'Start Capture' completed in 6.2s; bpm text shown: [] (see DL-12: value is simulated in code, not measured)",
+  "shot": "MT-13.png"
+ },
+ "MT-14": {
+  "result": "Pass",
+  "note": "No-face photo refused: ['Uploaded Reference Portrait']; clear face accepted: ['Upload a clear passport-size or identity-style photograph. This will be securely stored and used as the reference image to verify your identity during the live interview via AWS Rekognition.', 'Uploaded Reference Portrait']",
+  "shot": "MT-14a.png, MT-14b.png"
+ },
+ "MT-15": {
+  "result": "Pass",
+  "note": "'i consent' -> button disabled [['Accept & Continue', True]]; 'I CONSENT' -> accepted, moved to step 8",
+  "shot": "MT-15a.png"
+ },
+ "MT-16": {
+  "result": "Pass",
+  "note": "Button 'Begin interview' -> /session/eyJhbGciOiJIUzI1NiIsI...",
+  "shot": "MT-16.png"
+ }
+}
+=== sessD.json ===
+{
+ "R": {
+  "MT-24": {
+   "series": [
+    [
+     85,
+     "VERIFIED"
+    ],
+    [
+     79,
+     "CAUTION"
+    ],
+    [
+     74,
+     "CAUTION"
+    ],
+    [
+     89,
+     "VERIFIED"
+    ],
+    [
+     96,
+     "VERIFIED"
+    ],
+    [
+     98,
+     "VERIFIED"
+    ],
+    [
+     100,
+     "VERIFIED"
+    ],
+    [
+     100,
+     "VERIFIED"
+    ]
+   ],
+   "mods": {
+    "PRNU Identity": "30.0",
+    "rPPG Liveness": "30.0",
+    "Behavioral": "25.0",
+    "Jitter Check": "15.0"
+   },
+   "alerts": [
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:02:05 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 15% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.15"
+    },
+    {
+     "type": "JITTER \u00b7 DEEPFAKE RENDERING",
+     "time": "09:01:52 PM",
+     "msg": "Rendering overhead detected: CV=0.811 (threshold=0.2)",
+     "sev": "HIGH",
+     "value": "0.81"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:01:48 PM",
+     "msg": "Window lost focus for 7.0s",
+     "sev": "MEDIUM",
+     "value": "6.96"
+    }
+   ]
+  },
+  "MT-17": {
+   "lines": [
+    "Full Screen Required",
+    "This technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment.",
+    "Enter Full Screen to Continue",
+    "Exited Fullscreen mode \u2014 integrity warning logged."
+   ],
+   "gate": true
+  },
+  "MT-18": {
+   "tabs": [
+    {
+     "hidden": false,
+     "toast": []
+    },
+    {
+     "hidden": false,
+     "toast": []
+    },
+    {
+     "hidden": false,
+     "toast": []
+    }
+   ],
+   "alerts": [],
+   "all": [
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:02:41 PM",
+     "msg": "Window lost focus for 52.7s",
+     "sev": "MEDIUM",
+     "value": "52.68"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:02:05 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 15% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.15"
+    },
+    {
+     "type": "JITTER \u00b7 DEEPFAKE RENDERING",
+     "time": "09:01:52 PM",
+     "msg": "Rendering overhead detected: CV=0.811 (threshold=0.2)",
+     "sev": "HIGH",
+     "value": "0.81"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:01:48 PM",
+     "msg": "Window lost focus for 7.0s",
+     "sev": "MEDIUM",
+     "value": "6.96"
+    }
+   ]
+  },
+  "MT-19": {
+   "pasted_in_editor": false,
+   "toast": [
+    "Paste shortcut (Ctrl+V) is disabled."
+   ],
+   "ctoast": [
+    "INTEGRITY NOTICE \u00b7 CONTEXT MENU",
+    "Right-click context menu is disabled."
+   ],
+   "menu": false,
+   "alerts": [
+    {
+     "type": "BEHAVIORAL \u00b7 CONTEXT MENU BLOCKED",
+     "time": "09:03:12 PM",
+     "msg": "Candidate attempted right-click context menu (blocked)",
+     "sev": "INFO",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CLIPBOARD VIOLATION",
+     "time": "09:03:10 PM",
+     "msg": "Unauthorized clipboard action intercepted (Ctrl+V)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    }
+   ]
+  },
+  "MT-20": {
+   "cand": "Run\n1\nprint(2+3)\nTerminal Output\nSUCCESS\n(0.043s)\nClear\n\u2715\n5\n\nGAZE \u0394 0.032\nrPPG MONITOR ACTIVE\n1 FACE\nSECURE",
+   "rec": "DeepVerify Live Dashboard\nDV-2025-4840\nTechnical\nForensics\n8\nLive Code & Compiler\nConnection Secure\nInterviewer Cam On\nFlag Session\nEnd Session\nLIVE VERIFICATION FEED\n720p / 30fps\nYOU\n CAND.\nC1794756651\nID Pending\n\nQA Engineer\n\nUnverified\nActive Call\nView Reference vs Live Face\nCandidate Live Coding Workspace\npython\n\nSynchronized bi-directional compiler mirror\n\nLive Mirror\nTest Run\nLoading...\nLive Compiler Console\nSUCCESS\n(0.043s)\nClear Output\n5\n"
+  },
+  "MT-21": {
+   "before": [
+    93,
+    "VERIFIED"
+   ],
+   "series": [
+    [
+     69,
+     "CAUTION"
+    ],
+    [
+     44,
+     "CRITICAL ALERT"
+    ],
+    [
+     40,
+     "CRITICAL ALERT"
+    ],
+    [
+     38,
+     "CRITICAL ALERT"
+    ],
+    [
+     32,
+     "CRITICAL ALERT"
+    ],
+    [
+     31,
+     "CRITICAL ALERT"
+    ]
+   ],
+   "mods": {
+    "PRNU Identity": "0.0",
+    "rPPG Liveness": "0.0",
+    "Behavioral": "16.4",
+    "Jitter Check": "15.0"
+   },
+   "alerts": [
+    {
+     "type": "PRNU \u00b7 IDENTITY FRAUD",
+     "time": "09:04:07 PM",
+     "msg": "Live video has not matched the camera fingerprint of the camera enrolled at the system check for 20 s (PCE=3.1",
+     "sev": "HIGH",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:59 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:03:49 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 17% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.17"
+    },
+    {
+     "type": "PRNU \u00b7 PRNU FINGERPRINT CHANGE",
+     "time": "09:03:43 PM",
+     "msg": "Live video no longer matches the camera fingerprint of the camera enrolled at the system check (PCE=3.1, needs",
+     "sev": "MEDIUM",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:39 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:03:18 PM",
+     "msg": "Window lost focus for 5.0s",
+     "sev": "MEDIUM",
+     "value": "5.05"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CONTEXT MENU BLOCKED",
+     "time": "09:03:12 PM",
+     "msg": "Candidate attempted right-click context menu (blocked)",
+     "sev": "INFO",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CLIPBOARD VIOLATION",
+     "time": "09:03:10 PM",
+     "msg": "Unauthorized clipboard action intercepted (Ctrl+V)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    }
+   ]
+  },
+  "MT-22": {
+   "before": [
+    85,
+    "VERIFIED"
+   ],
+   "series": [
+    [
+     90,
+     "VERIFIED"
+    ],
+    [
+     88,
+     "VERIFIED"
+    ],
+    [
+     86,
+     "VERIFIED"
+    ],
+    [
+     84,
+     "VERIFIED"
+    ],
+    [
+     82,
+     "VERIFIED"
+    ]
+   ],
+   "alerts": [
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:04:27 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 GAZE ANOMALY",
+     "time": "09:04:12 PM",
+     "msg": "Sustained off-screen gaze detected (\u0394=0.454)",
+     "sev": "MEDIUM",
+     "value": "0.45"
+    },
+    {
+     "type": "PRNU \u00b7 IDENTITY FRAUD",
+     "time": "09:04:07 PM",
+     "msg": "Live video has not matched the camera fingerprint of the camera enrolled at the system check for 20 s (PCE=3.1",
+     "sev": "HIGH",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:59 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:03:49 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 17% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.17"
+    },
+    {
+     "type": "PRNU \u00b7 PRNU FINGERPRINT CHANGE",
+     "time": "09:03:43 PM",
+     "msg": "Live video no longer matches the camera fingerprint of the camera enrolled at the system check (PCE=3.1, needs",
+     "sev": "MEDIUM",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:39 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:03:18 PM",
+     "msg": "Window lost focus for 5.0s",
+     "sev": "MEDIUM",
+     "value": "5.05"
+    }
+   ],
+   "badge": [
+    "0 FACE"
+   ]
+  },
+  "MT-23": {
+   "text": "Full Screen Required\n\nThis technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment.\n\nEnter Full Screen to Continue\nActive Proctored Session\n\u2713 Face Verified (94.8%)\nInterview\nFullscreen\n00:00:04\nEnd Interview\nID VERIFIED\nC1794756651\nWorkspace\nPython\nJavaScript\nTypeScript\nJava\nC\nC++\nGo\nRust\nRun\nLoading...\nGAZE \u0394 0.000\nrPPG MONITOR AC",
+   "url": "http://127.0.0.1:5173/session/eyJhbGciOi",
+   "rec_after": [
+    82,
+    "VERIFIED"
+   ]
+  },
+  "MT-25": {
+   "n": 18,
+   "alerts": [
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:05:04 PM",
+     "msg": "Candidate switched tabs (#1 in session)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 GAZE ANOMALY",
+     "time": "09:04:59 PM",
+     "msg": "Sustained off-screen gaze detected (\u0394=0.453)",
+     "sev": "MEDIUM",
+     "value": "0.45"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:04:55 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:04:27 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 GAZE ANOMALY",
+     "time": "09:04:12 PM",
+     "msg": "Sustained off-screen gaze detected (\u0394=0.454)",
+     "sev": "MEDIUM",
+     "value": "0.45"
+    },
+    {
+     "type": "PRNU \u00b7 IDENTITY FRAUD",
+     "time": "09:04:07 PM",
+     "msg": "Live video has not matched the camera fingerprint of the camera enrolled at the system check for 20 s (PCE=3.1",
+     "sev": "HIGH",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:59 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:03:49 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 17% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.17"
+    },
+    {
+     "type": "PRNU \u00b7 PRNU FINGERPRINT CHANGE",
+     "time": "09:03:43 PM",
+     "msg": "Live video no longer matches the camera fingerprint of the camera enrolled at the system check (PCE=3.1, needs",
+     "sev": "MEDIUM",
+     "value": "3.08"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CANDIDATE ABSENCE",
+     "time": "09:03:39 PM",
+     "msg": "Candidate face not detected in camera frame",
+     "sev": "HIGH",
+     "value": "0.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:03:18 PM",
+     "msg": "Window lost focus for 5.0s",
+     "sev": "MEDIUM",
+     "value": "5.05"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CONTEXT MENU BLOCKED",
+     "time": "09:03:12 PM",
+     "msg": "Candidate attempted right-click context menu (blocked)",
+     "sev": "INFO",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 CLIPBOARD VIOLATION",
+     "time": "09:03:10 PM",
+     "msg": "Unauthorized clipboard action intercepted (Ctrl+V)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:03:07 PM",
+     "msg": "Window lost focus for 24.9s",
+     "sev": "MEDIUM",
+     "value": "24.86"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:02:41 PM",
+     "msg": "Window lost focus for 52.7s",
+     "sev": "MEDIUM",
+     "value": "52.68"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:02:05 PM",
+     "msg": "No stable biological pulse over the last 15 s: only 15% of windows show one",
+     "sev": "CRITICAL",
+     "value": "0.15"
+    },
+    {
+     "type": "JITTER \u00b7 DEEPFAKE RENDERING",
+     "time": "09:01:52 PM",
+     "msg": "Rendering overhead detected: CV=0.811 (threshold=0.2)",
+     "sev": "HIGH",
+     "value": "0.81"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:01:48 PM",
+     "msg": "Window lost focus for 7.0s",
+     "sev": "MEDIUM",
+     "value": "6.96"
+    }
+   ],
+   "newest_first": [
+    "09:05:04 PM",
+    "09:04:59 PM",
+    "09:04:55 PM",
+    "09:04:27 PM",
+    "09:04:12 PM",
+    "09:04:07 PM"
+   ]
+  },
+  "MT-26": {
+   "lines": [
+    "Flag Session"
+   ],
+   "api": {}
+  },
+  "MT-28": {
+   "before": 18,
+   "after": 18,
+   "score": [
+    86,
+    "VERIFIED"
+   ],
+   "mods": {
+    "PRNU Identity": "30.0",
+    "rPPG Liveness": "30.0",
+    "Behavioral": "14.8",
+    "Jitter Check": "11.5"
+   }
+  }
+ },
+ "EV": [
+  "session DV-2025-4840",
+  "MT-24 series [(85, 'VERIFIED'), (79, 'CAUTION'), (74, 'CAUTION'), (89, 'VERIFIED'), (96, 'VERIFIED'), (98, 'VERIFIED'), (100, 'VERIFIED'), (100, 'VERIFIED')] {'PRNU Identity': '30.0', 'rPPG Liveness': '30.0', 'Behavioral': '25.0', 'Jitter Check': '15.0'}",
+  "MT-17 text: ['Full Screen Required', 'This technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment.', 'Enter Full Screen to Continue', 'Exited Fullscreen mode \u2014 integrity warning logged.']",
+  "fullscreen back? True",
+  "tab switch 1: hidden=False toast=[]",
+  "tab switch 2: hidden=False toast=[]",
+  "tab switch 3: hidden=False toast=[]",
+  "MT-18 alerts: []",
+  "MT-19 pasted_in_editor False ['Paste shortcut (Ctrl+V) is disabled.'] ctx toast ['INTEGRITY NOTICE \u00b7 CONTEXT MENU', 'Right-click context menu is disabled.'] menu False",
+  "MT-19 alerts: [{'type': 'BEHAVIORAL \u00b7 CONTEXT MENU BLOCKED', 'time': '09:03:12 PM', 'msg': 'Candidate attempted right-click context menu (blocked)', 'sev': 'INFO', 'value': '1.00'}, {'type': 'BEHAVIORAL \u00b7 CLIPBOARD VIOLATION', 'time': '09:03:10 PM', 'msg': 'Unauthorized clipboard action intercepted (Ctrl+V)', 'sev': 'MEDIUM', 'value': '1.00'}]",
+  "CAND after run: Run | 1 | print(2+3) | Terminal Output | SUCCESS | (0.043s) | Clear | \u2715 | 5 |  | GAZE \u0394 0.032 | rPPG MONITOR ACTIVE | 1 FACE | SECURE",
+  "RECRUITER code tab: DeepVerify Live Dashboard | DV-2025-4840 | Technical | Forensics | 8 | Live Code & Compiler | Connection Secure | Interviewer Cam On | Flag Session | End Session | LIVE VERIFICATION FEED | 720p / 30fps | YOU |  CAND. | C1794756651 | ID Pending |  | QA Engineer |  | Unverified | Active Call | View Reference vs Live Face | Candidate Live Coding Workspace | python |  | Synchronized bi-directional compiler mirror |  | Live Mirror | Test Run | Loading... | Live Compiler Console | SUCCESS | (0.043s) | Clear Output | 5 | ",
+  "MT-21 before (93, 'VERIFIED') after [(69, 'CAUTION'), (44, 'CRITICAL ALERT'), (40, 'CRITICAL ALERT'), (38, 'CRITICAL ALERT'), (32, 'CRITICAL ALERT'), (31, 'CRITICAL ALERT')] {'PRNU Identity': '0.0', 'rPPG Liveness': '0.0', 'Behavioral': '16.4', 'Jitter Check': '15.0'}",
+  "alerts: [('PRNU \u00b7 IDENTITY FRAUD', 'HIGH'), ('BEHAVIORAL \u00b7 CANDIDATE ABSENCE', 'HIGH'), ('RPPG \u00b7 LIVENESS FAIL', 'CRITICAL'), ('PRNU \u00b7 PRNU FINGERPRINT CHANGE', 'MEDIUM'), ('BEHAVIORAL \u00b7 CANDIDATE ABSENCE', 'HIGH'), ('BEHAVIORAL \u00b7 WINDOW BLUR', 'MEDIUM')]",
+  "MT-22 before (85, 'VERIFIED') after [(90, 'VERIFIED'), (88, 'VERIFIED'), (86, 'VERIFIED'), (84, 'VERIFIED'), (82, 'VERIFIED')] cand badge: ['0 FACE']",
+  "alerts: [('BEHAVIORAL \u00b7 CANDIDATE ABSENCE', 'HIGH', 'Candidate face not detected in camera frame'), ('BEHAVIORAL \u00b7 GAZE ANOMALY', 'MEDIUM', 'Sustained off-screen gaze detected (\u0394=0.454)'), ('PRNU \u00b7 IDENTITY FRAUD', 'HIGH', 'Live video has not matched the camera fingerprint '), ('BEHAVIORAL \u00b7 CANDIDATE ABSENCE', 'HIGH', 'Candidate face not detected in camera frame'), ('RPPG \u00b7 LIVENESS FAIL', 'CRITICAL', 'No stable biological pulse over the last 15 s: onl'), ('PRNU \u00b7 PRNU FINGERPRINT CHANGE', 'MEDIUM', 'Live video no longer matches the camera fingerprin')]",
+  "MT-23 after reload cand: Full Screen Required |  | This technical interview requires your browser to be in full screen mode at all times to ensure an isolated testing environment. |  | Enter Full Screen to Continue | Active Proctored Session | \u2713 Face Verified (94.8%) | Interview | Fullscreen | 00:00:04 | End Interview | ID VERIFIED | C1794756651 | Workspace | Python | JavaScript | TypeScript | Java | C | C++ | Go | Rust | Run | Loading... | GAZE \u0394 0.000 | rPPG MONITOR AC url http://127.0.0.1:5173/session/eyJhbGciOi",
+  "rec after cand reload: (82, 'VERIFIED') {'PRNU Identity': '30.0', 'rPPG Liveness': '26.3', 'Behavioral': '14.8', 'Jitter Check': '11.4'}",
+  "MT-25 feed n= 18 dups: 0",
+  "MT-26 after flag: ['Flag Session']",
+  "session flagged field: {}",
+  "MT-28 reload: alerts before 18 after 18 score (86, 'VERIFIED')",
+  "end dialog: in camera frame |  | HIGH | Value: 0.00 | ACKNOWLEDGE | BEHAVIORAL \u00b7 GAZE ANOMALY | 09:04:59 PM |  | Sustained off-screen gaze detected (\u0394=0.453) |  | MEDIUM | Value: 0.45 | ACKNOWLEDGE | BEHAVIORAL \u00b7 TAB SWITCH | 09:05:04 PM |  | Candidate switched tabs (#1 in session) |  | MEDIUM | Value: 1.00 | ACKNOWLEDGE | Conclude Interview Session? |  | Session DV-2025-4840 |  | Are you sure you want to end this interview? The candidate will be disconnected, and the final forensic trust score and biometric logs will be finalized. |  | Cancel | Yes, End Session"
+ ],
+ "sid": "DV-2025-4840"
+}
+=== sessE.json ===
+{
+ "R": {
+  "MT-18": {
+   "tabs": [
+    [
+     "Tab switch logged as an integrity violation.",
+     "Tab switched or minimized \u2014 integrity warning logged."
+    ],
+    [
+     "Tab switch logged as an integrity violation.",
+     "Tab switched or minimized \u2014 integrity warning logged."
+    ],
+    [
+     "Tab switch logged as an integrity violation.",
+     "Tab switched or minimized \u2014 integrity warning logged."
+    ]
+   ],
+   "alerts": [
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:26 PM",
+     "msg": "Candidate switched tabs (#3 in session)",
+     "sev": "HIGH",
+     "value": "3.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:20 PM",
+     "msg": "Candidate switched tabs (#2 in session)",
+     "sev": "MEDIUM",
+     "value": "2.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:14 PM",
+     "msg": "Candidate switched tabs (#1 in session)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    }
+   ]
+  },
+  "MT-22": {
+   "before": [
+    84,
+    "VERIFIED"
+   ],
+   "series": [
+    [
+     82,
+     "VERIFIED"
+    ],
+    [
+     82,
+     "VERIFIED"
+    ],
+    [
+     81,
+     "VERIFIED"
+    ],
+    [
+     79,
+     "CAUTION"
+    ],
+    [
+     79,
+     "CAUTION"
+    ]
+   ],
+   "alerts": [
+    {
+     "type": "JITTER \u00b7 DEEPFAKE RENDERING",
+     "time": "09:08:58 PM",
+     "msg": "Rendering overhead detected: CV=0.425 (threshold=0.2)",
+     "sev": "HIGH",
+     "value": "0.43"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 MULTI FACE DETECTED",
+     "time": "09:08:43 PM",
+     "msg": "Multiple faces detected in camera feed (2 people visible)",
+     "sev": "CRITICAL",
+     "value": "2.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:26 PM",
+     "msg": "Candidate switched tabs (#3 in session)",
+     "sev": "HIGH",
+     "value": "3.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:20 PM",
+     "msg": "Candidate switched tabs (#2 in session)",
+     "sev": "MEDIUM",
+     "value": "2.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 TAB SWITCH",
+     "time": "09:08:14 PM",
+     "msg": "Candidate switched tabs (#1 in session)",
+     "sev": "MEDIUM",
+     "value": "1.00"
+    },
+    {
+     "type": "JITTER \u00b7 DEEPFAKE RENDERING",
+     "time": "09:07:55 PM",
+     "msg": "Rendering overhead detected: CV=0.998 (threshold=0.2)",
+     "sev": "HIGH",
+     "value": "1.00"
+    },
+    {
+     "type": "BEHAVIORAL \u00b7 WINDOW BLUR",
+     "time": "09:07:50 PM",
+     "msg": "Window lost focus for 8.5s",
+     "sev": "MEDIUM",
+     "value": "8.47"
+    },
+    {
+     "type": "RPPG \u00b7 LIVENESS FAIL",
+     "time": "09:07:42 PM",
+     "msg": "No biological pulse detected: SNR=-2.0dB (threshold=2.5dB)",
+     "sev": "CRITICAL",
+     "value": "-2.00"
+    }
+   ],
+   "badges": [
+    [
+     "2 FACES",
+     "2 FACE"
+    ],
+    [
+     "2 FACES",
+     "2 FACE"
+    ],
+    [
+     "2 FACES",
+     "2 FACE"
+    ],
+    [
+     "2 FACES",
+     "2 FACE"
+    ],
+    [
+     "2 FACES",
+     "2 FACE"
+    ]
+   ]
+  },
+  "MT-27": {
+   "pdf": "./shots/report_DV-2025-7435.pdf",
+   "name": "DeepVerify_Report_C1794757006_DV-2025-7435.pdf",
+   "cand_after": "Focus Lost\n\nYou switched tabs or minimized the window. Leaving the interview environment is strictly prohibited. This incident has been logged and flagged on your trust score.\n\nI Understand, Return to Interview\nActive Proctored Session\n\u2713 Face Verified (94.8%)\nInterview\nExit Fullscreen\n00:01:36\nEnd I"
+  }
+ },
+ "EV": [
+  "session DV-2025-7435",
+  "tab switch 1: toast=['Tab switch logged as an integrity violation.', 'Tab switched or minimized \u2014 integrity warning logged.']",
+  "tab switch 2: toast=['Tab switch logged as an integrity violation.', 'Tab switched or minimized \u2014 integrity warning logged.']",
+  "tab switch 3: toast=['Tab switch logged as an integrity violation.', 'Tab switched or minimized \u2014 integrity warning logged.']",
+  "MT-18 alerts: [('BEHAVIORAL \u00b7 TAB SWITCH', 'HIGH', 'Candidate switched tabs (#3 in session)'), ('BEHAVIORAL \u00b7 TAB SWITCH', 'MEDIUM', 'Candidate switched tabs (#2 in session)'), ('BEHAVIORAL \u00b7 TAB SWITCH', 'MEDIUM', 'Candidate switched tabs (#1 in session)')]",
+  "MT-22 before (84, 'VERIFIED') after [(82, 'VERIFIED'), (82, 'VERIFIED'), (81, 'VERIFIED'), (79, 'CAUTION'), (79, 'CAUTION')] cand badge: [['2 FACES', '2 FACE'], ['2 FACES', '2 FACE'], ['2 FACES', '2 FACE'], ['2 FACES', '2 FACE'], ['2 FACES', '2 FACE']]",
+  "alerts: [('JITTER \u00b7 DEEPFAKE RENDERING', 'HIGH', 'Rendering overhead detected: CV=0.425 (threshold=0.2)'), ('BEHAVIORAL \u00b7 MULTI FACE DETECTED', 'CRITICAL', 'Multiple faces detected in camera feed (2 people visible)'), ('BEHAVIORAL \u00b7 TAB SWITCH', 'HIGH', 'Candidate switched tabs (#3 in session)'), ('BEHAVIORAL \u00b7 TAB SWITCH', 'MEDIUM', 'Candidate switched tabs (#2 in session)'), ('BEHAVIORAL \u00b7 TAB SWITCH', 'MEDIUM', 'Candidate switched tabs (#1 in session)'), ('JITTER \u00b7 DEEPFAKE RENDERING', 'HIGH', 'Rendering overhead detected: CV=0.998 (threshold=0.2)'), ('BEHAVIORAL \u00b7 WINDOW BLUR', 'MEDIUM', 'Window lost focus for 8.5s'), ('RPPG \u00b7 LIVENESS FAIL', 'CRITICAL', 'No biological pulse detected: SNR=-2.0dB (threshold=2.5dB)')]",
+  "after end: DeepVerify | INTERVIEW SUMMARY | Completed |  | SESSION COMPLETE |  | Interview Session Concluded |  | Session DV-2025-7435 with candidate C1794757006 has been ended and marked as complete. |  | Candidate: | C1794757006 (QA Engineer) | Overall Trust Score: | 79 / 100 | AWS Face Verification: | Processed | Recorded Alerts: | 8 Flagged Events | Download PDF Report | Dashboard | FINAL TRUST SCORE | 79 | TRUST | CAUTION | FORENSIC BREAKDOWN | PRNU Identity | 30.0 / 30 | rPPG Liveness | 30.0 / 30 | Behavioral | 19.0 / 25 | Jitter Check | 0.0 / 15",
+  "PDF saved ./shots/report_DV-2025-7435.pdf DeepVerify_Report_C1794757006_DV-2025-7435.pdf",
+  "cand after end: Focus Lost |  | You switched tabs or minimized the window. Leaving the interview environment is strictly prohibited. This incident has been logged and flagged on your trust score. |  | I Understand, Return to Interview | Active Proctored Session | \u2713 Face Verified (94.8%) | Interview | Exit Fullscreen | 00:01:36 | End I"
+ ],
+ "sid": "DV-2025-7435"
+}
+=== sessF.json ===
+{
+ "R": {
+  "MT-20t": {
+   "cand": 1.5384762287139893,
+   "rec": 1.6210508346557617
+  },
+  "loop": {
+   "cand": 1.8237090110778809,
+   "rec": 0.8396880626678467,
+   "out": "Terminal Output\nERROR\n(0.082s)\nClear\n\u2715\n  File \"<string>\", line 1\n    whle True: pass\n         ^^^^\nSyntaxError: invalid syntax\n\nGAZE \u0394 0.044\nrPPG MONITOR ACTIVE\n1 FACE\nSECURE"
+  }
+ },
+ "EV": [
+  "session DV-2025-5412",
+  "MT-20 timing: candidate 1.5384762287139893 recruiter 1.6210508346557617",
+  "cand out: Terminal Output | SUCCESS | (0.037s) | Clear | \u2715 | 5 |  | GAZE \u0394 0.036 | rPPG MONITOR ACTIVE | 1 FACE | SECURE",
+  "rec out: Live Compiler Console | SUCCESS | (0.037s) | Clear Output | 5 | ",
+  "infinite loop: candidate 1.8237090110778809 recruiter 0.8396880626678467",
+  "loop out: Terminal Output | ERROR | (0.082s) | Clear | \u2715 |   File \"<string>\", line 1 |     whle True: pass |          ^^^^ | SyntaxError: invalid syntax |  | GAZE \u0394 0.044 | rPPG MONITOR ACTIVE | 1 FACE | SECURE"
+ ]
+}
+=== final1.json ===
+{
+ "MT-29": {
+  "series": [
+   100,
+   100,
+   93,
+   86,
+   85,
+   87,
+   87,
+   89,
+   90,
+   87
+  ],
+  "mods": {
+   "PRNU Identity": "30.0",
+   "rPPG Liveness": "28.9",
+   "Behavioral": "25.0",
+   "Jitter Check": "2.9"
+  },
+  "alerts": "FORENSIC ALERTS |  | No alerts detected |  | System integrity is stable"
+ },
+ "idstatus": []
+}
+=== mt30_file.json ===
+{"series": [58, 62, 64, 64, 63, 63, 66, 66, 63, 63, 63, 63, 62, 62], "alerts": "FORENSIC ALERTS\nPRNU \u00b7 IDENTITY FRAUD\n08:45:20 PM\n\nLive video has not matched the camera fingerprint of the camera enrolled at the system check for 20 s (PCE=19.5) \u2014 a different camera, a replayed recording or an injected video\n\nHIGH\nValue: 19.47\nACKNOWLEDGE\nPRNU \u00b7 PRNU FINGERPRINT CHANGE\n08:45:04 PM\n\nLive video no longer matches the camera fingerprint of the camera enrolled at the system check (PCE=16.5, needs \u226560) \u2014 verifying identity\n\nMEDIUM\nValue: 16.50\nACKNOWLEDGE", "modules": {"PRNU Identity": "0.0", "rPPG Liveness": "30.0", "Behavioral": "25.0", "Jitter Check": "6.8"}}
+=== mobile.json ===
+{
+ "phone 375x667 /": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 108
+ },
+ "phone 375x667 /auth/recruiter/login": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 0
+ },
+ "phone 375x667 /auth/candidate/login": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 0
+ },
+ "phone 375x667 /auth/recruiter/signup": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 0
+ },
+ "phone 375x667 /demo": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 51
+ },
+ "phone 375x667 recruiter dashboard": {
+  "scrollW": 375,
+  "innerW": 375,
+  "overflowingEls": 0,
+  "url": "/recruiter/dashboard"
+ },
+ "small 320x568 /": {
+  "scrollW": 320,
+  "innerW": 320,
+  "overflowingEls": 140
+ },
+ "small 320x568 /auth/recruiter/login": {
+  "scrollW": 320,
+  "innerW": 320,
+  "overflowingEls": 0
+ },
+ "small 320x568 /auth/candidate/login": {
+  "scrollW": 320,
+  "innerW": 320,
+  "overflowingEls": 0
+ },
+ "small 320x568 /auth/recruiter/signup": {
+  "scrollW": 320,
+  "innerW": 320,
+  "overflowingEls": 0
+ },
+ "small 320x568 /demo": {
+  "scrollW": 353,
+  "innerW": 320,
+  "overflowingEls": 54
+ },
+ "small 320x568 recruiter dashboard": {
+  "scrollW": 320,
+  "innerW": 320,
+  "overflowingEls": 1,
+  "url": "/recruiter/dashboard"
+ }
+}

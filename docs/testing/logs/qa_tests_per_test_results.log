@@ -1,0 +1,66 @@
+== Unit Testing (slide: 14, executed: 14) ==
+  PASS  test_01_unit::test_07_layer_weights_cap_at_30_30_15_25
+  PASS  test_01_unit::test_08_genuine_candidate_is_verified_with_no_alerts
+  PASS  test_01_unit::test_09_zero_trust_prnu_and_rppg_failure_cannot_pass
+  PASS  test_01_unit::test_10_verdict_bands_and_colours
+  PASS  test_01_unit::test_11_access_token_round_trip_keeps_claims
+  PASS  test_01_unit::test_12_expired_token_rejected_with_401
+  PASS  test_01_unit::test_13_tampered_or_foreign_signature_rejected
+  PASS  test_01_unit::test_14_session_token_is_scoped_to_session_and_role
+  PASS  test_01_unit::test_01_noise_residual_has_input_shape
+  PASS  test_01_unit::test_02_reference_fingerprint_is_finite_and_full_size
+  PASS  test_01_unit::test_03_match_score_bands
+  PASS  test_01_unit::test_04_detects_72_bpm_pulse
+  PASS  test_01_unit::test_05_noise_without_pulse_is_not_live
+  PASS  test_01_unit::test_06_pos_projection_output_length_and_short_input
+== Integration Testing (slide: 24, executed: 24) ==
+  PASS  test_02a_integration_api::test_01_health_and_ping_endpoints
+  PASS  test_02a_integration_api::test_02_recruiter_register_login_and_profile
+  PASS  test_02a_integration_api::test_03_bad_password_and_bad_token_are_rejected
+  PASS  test_02b_integration_mongodb::test_01_create_session_is_persisted_with_tokens
+  PASS  test_02b_integration_mongodb::test_02_get_session_and_by_token_round_trip
+  PASS  test_02b_integration_mongodb::test_03_status_patch_stamps_start_and_end_times
+  PASS  test_02b_integration_mongodb::test_04_consent_is_stored_only_for_exact_text
+  PASS  test_02b_integration_mongodb::test_05_user_is_stored_hashed_and_email_is_unique
+  PASS  test_02c_integration_redis::test_01_trust_score_published_on_session_channel
+  PASS  test_02c_integration_redis::test_02_alert_published_on_alert_channel
+  PASS  test_02c_integration_redis::test_03_channels_are_isolated_between_sessions
+  PASS  test_02c_integration_redis::test_04_code_channel_and_combined_subscription
+  PASS  test_02c_integration_redis::test_05_axiom_alert_payload_survives_json_round_trip
+  PASS  test_02d_integration_websocket::test_01_frames_socket_rejects_unknown_session
+  PASS  test_02d_integration_websocket::test_02_jpeg_i_frames_are_ingested_and_counted
+  PASS  test_02d_integration_websocket::test_03_prnu_crop_packet_reaches_the_prnu_tracker
+  PASS  test_02d_integration_websocket::test_04_behavioural_events_are_persisted_and_alerted
+  PASS  test_02d_integration_websocket::test_05_multi_face_gaze_message_raises_critical_alert
+  PASS  test_02d_integration_websocket::test_06_dashboard_socket_rejects_unknown_session
+  PASS  test_02d_integration_websocket::test_07_dashboard_socket_sends_session_info_first
+  PASS  test_02e_integration_rekognition::test_01_single_clear_face_passes_reference_validation
+  PASS  test_02e_integration_rekognition::test_02_photo_with_two_faces_is_rejected
+  PASS  test_02e_integration_rekognition::test_03_live_snapshot_matching_reference_is_verified
+  PASS  test_02e_integration_rekognition::test_04_different_person_is_flagged_as_face_mismatch
+== System / E2E Testing (slide: 10, executed: 10) ==
+  PASS  test_03_e2e::test_01_full_candidate_onboarding
+  PASS  test_03_e2e::test_02_recruiter_issues_session_and_candidate_opens_link
+  PASS  test_03_e2e::test_03_live_interview_tab_switch_reaches_recruiter_dashboard
+  PASS  test_03_e2e::test_04_second_person_in_frame_raises_critical_dashboard_alert
+  PASS  test_03_e2e::test_05_monaco_compiler_run_is_synced_to_recruiter
+  PASS  test_03_e2e::test_06_pdf_forensic_audit_report_is_generated
+  PASS  test_03_e2e::test_07_report_summary_matches_recorded_telemetry
+  PASS  test_03_e2e::test_08_session_lifecycle_pending_active_flagged
+  PASS  test_03_e2e::test_09_genuine_candidate_pipeline_is_verified
+  PASS  test_03_e2e::test_10_injected_deepfake_pipeline_drops_to_critical
+== Boundary & Error Tests (slide: 12, executed: 12) ==
+  PASS  test_04_boundary::test_01_camera_disabled_zeroes_trust_and_alerts_critical
+  PASS  test_04_boundary::test_02_missing_pulse_is_not_live_and_flags_critical
+  PASS  test_04_boundary::test_03_repeated_tab_switching_escalates_to_high
+  PASS  test_04_boundary::test_04_copy_paste_attempts_are_blocked_and_reported
+  PASS  test_04_boundary::test_05_injected_video_from_another_source_fails_identity
+  PASS  test_04_boundary::test_06_extreme_inputs_are_clamped_to_0_100
+  PASS  test_04_boundary::test_07_garbage_token_and_unknown_ids_are_rejected
+  PASS  test_04_boundary::test_08_wrong_consent_text_and_invalid_body_are_refused
+  PASS  test_04_boundary::test_09_runaway_code_is_killed_by_the_timeout
+  PASS  test_04_boundary::test_10_empty_and_broken_code_return_clean_errors
+  PASS  test_04_boundary::test_11_malformed_socket_messages_do_not_kill_the_stream
+  PASS  test_04_boundary::test_12_aws_rekognition_errors_are_returned_not_raised
+
+TOTAL 60
