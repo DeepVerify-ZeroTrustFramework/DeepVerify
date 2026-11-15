@@ -1,0 +1,4 @@
+# Extra packages needed only by qa_tests (install on top of backend/requirements.txt)
+httpx
+fakeredis
+mongomock-motor
