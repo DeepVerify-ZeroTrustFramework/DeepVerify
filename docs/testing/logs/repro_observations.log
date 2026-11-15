@@ -1,0 +1,7 @@
+[DL-01] PRNU mismatch + SNR -5.0 dB -> score 40.0, Integrity Alert — Review Required, alerts=['CRITICAL']
+[DL-01] PRNU mismatch + SNR +1.0 dB -> score 62.0, Caution, alerts=[]
+[DL-02] flat (no-signal) feed -> detect_liveness=(False, 0.0, 0.0), rPPG points=18.0/30, alerts=0
+[DL-03] pce=0 only -> PRNU 19.57/30 ; with prnu_match=0 + mismatch -> 0.0/30
+[DL-04] POST /api/sessions without any token -> HTTP 201
+[DL-04] POST /api/compiler/run without any token -> status SUCCESS
+[DL-05] submitted code ran as the server process and could see the server's folder: ['True']
