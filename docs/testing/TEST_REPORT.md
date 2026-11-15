@@ -46,7 +46,7 @@ The application code is **not mocked**: routes, authentication, AXIOM, PRNU, rPP
 | MongoDB | `mongo:7` + Motor | `mongomock-motor` (in-memory, Motor-compatible) |
 | Redis | `redis:7` + redis-py asyncio | `fakeredis` (real redis-py API, in-process server) |
 | AWS Rekognition | boto3 client | real boto3 client with botocore `Stubber` (requests are validated, no network) |
-| Browser / WebRTC media | React + MediaPipe | **not exercised** (§6) |
+| Browser / WebRTC media | React + MediaPipe | exercised separately by the manual cases (§11), with a synthetic camera |
 
 A safety net in the test harness removes real AWS/Cloudinary settings, so the tests can never call a live cloud service.
 
@@ -137,8 +137,8 @@ Highlights: JPEG I-frames sent over `/ws/frames` are decoded and counted; a nati
 |---|---|---|
 | Docker Compose bring-up / "verified across Docker and cloud" | Docker unavailable in the test sandbox | `docker compose up --build`, then run the same commands in the backend container |
 | Real MongoDB / Redis / AWS Rekognition | Replaced by in-memory fakes and a stubbed client (§2) | Real services and credentials |
-| WebRTC media, MediaPipe in a real browser, camera capture, frontend copy-paste blocking | Need a browser and camera | Playwright / manual run |
-| 275–350 ms end-to-end latency, Trust Score 57 | Need the live stack and an injected video file | Live demo run |
+| Physical webcam, Firefox/Edge, WebRTC between two machines | Not available in the test environment (browser behaviour with a synthetic camera is in §11) | Real devices |
+| 275–350 ms end-to-end latency, Trust Score 57 | Latency needs the real network; the injected-video run was done (§11) and scored ≈ 63, not 57 | Live demo on the deployed stack |
 | `/ws/signaling`, TTS, Sightengine, Cloudinary | Out of the deck's listed scope / no credentials | — |
 
 ---
@@ -167,6 +167,15 @@ All **60 tests (14 + 24 + 10 + 12) pass** against the real application code, mat
 
 Test code: `backend/qa_tests/` — `_bootstrap.py`, `_harness.py`, `test_01_unit.py`, `test_02a…e_integration_*.py`, `test_03_e2e.py`, `test_04_boundary.py`, `run_suite.py`, `bench_latency.py`, `requirements-test.txt`.
 
+## 11. Manual / browser test execution (32 cases)
+
+All 32 manual cases were executed on 2026-11-15 in Google Chrome through Playwright against the real frontend and backend: **29 Pass, 2 Fail, 1 Blocked** ([MANUAL_TEST_REPORT.md](MANUAL_TEST_REPORT.md), evidence in `manual_evidence/`). The camera was a synthetic feed and face verification ran in simulation mode (no AWS), so these results show the application reacts correctly to such input, not that a real webcam scores identically.
+
+- **Worked as intended:** sign-up/login, protected pages, photo checks, camera-blocked handling, consent wording, fullscreen/tab-switch/copy-paste/right-click controls with recruiter alerts, code run mirrored to the recruiter in 1.6 s, covered-camera and second-person alerts, PDF report, reload and refresh recovery, small-window layout.
+- **Deck scenario:** a genuine camera reached **100 (Verified)**; an injected pre-recorded video was detected (PRNU 0/30, HIGH alert) but scored **≈ 63 (Caution)**, not 57 / Critical (DL-21).
+- **Failures:** MT-26 Flag Session does nothing (DL-15); MT-30 as above. **Blocked:** MT-31 (only Chrome).
+- **New findings:** DL-11 … DL-21, including a hard-coded API key in the frontend (DL-19) and a simulated heart-rate step (DL-12).
+
 ## 10. Related documents
 
 | Document | Purpose |
@@ -174,6 +183,7 @@ Test code: `backend/qa_tests/` — `_bootstrap.py`, `_harness.py`, `test_01_unit
 | [TEST_PLAN.md](TEST_PLAN.md) | Scope, approach, entry/exit criteria, risks |
 | [TEST_CASES.md](TEST_CASES.md) | All 60 test cases (generated from the code) |
 | [TRACEABILITY_MATRIX.md](TRACEABILITY_MATRIX.md) | Deck item → test case → result |
-| [DEFECT_LOG.md](DEFECT_LOG.md) | Findings DL-01 … DL-10 with reproduction (`qa_tests/repro_observations.py`) |
+| [DEFECT_LOG.md](DEFECT_LOG.md) | Findings DL-01 … DL-21 |
+| [MANUAL_TEST_REPORT.md](MANUAL_TEST_REPORT.md) | 32 executed manual/browser cases with results and evidence |
 | [ENVIRONMENT.md](ENVIRONMENT.md) | Exact versions and services used |
 | [RUNNING_TESTS.md](RUNNING_TESTS.md) | Step-by-step guide to re-run everything |
