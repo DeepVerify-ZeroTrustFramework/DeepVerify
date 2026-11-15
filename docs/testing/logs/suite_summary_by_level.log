@@ -1,0 +1,6 @@
+Testing level              Slide   Run  Passed  Failed  Skipped  Time(s)
+Unit Testing                  14    14      14       0        0      0.3
+Integration Testing           24    24      24       0        0      6.3
+System / E2E Testing          10    10      10       0        0      1.0
+Boundary & Error Tests        12    12      12       0        0      8.9
+TOTAL                         60    60      60       0        0
