@@ -166,3 +166,14 @@ All **60 tests (14 + 24 + 10 + 12) pass** against the real application code, mat
 `suite_summary_by_level.log` · `qa_tests_per_test_results.log` · `latency_benchmark.log` · `frontend_tsc.log` · `frontend_vite_build.log` · `frontend_eslint.log`
 
 Test code: `backend/qa_tests/` — `_bootstrap.py`, `_harness.py`, `test_01_unit.py`, `test_02a…e_integration_*.py`, `test_03_e2e.py`, `test_04_boundary.py`, `run_suite.py`, `bench_latency.py`, `requirements-test.txt`.
+
+## 10. Related documents
+
+| Document | Purpose |
+|---|---|
+| [TEST_PLAN.md](TEST_PLAN.md) | Scope, approach, entry/exit criteria, risks |
+| [TEST_CASES.md](TEST_CASES.md) | All 60 test cases (generated from the code) |
+| [TRACEABILITY_MATRIX.md](TRACEABILITY_MATRIX.md) | Deck item → test case → result |
+| [DEFECT_LOG.md](DEFECT_LOG.md) | Findings DL-01 … DL-10 with reproduction (`qa_tests/repro_observations.py`) |
+| [ENVIRONMENT.md](ENVIRONMENT.md) | Exact versions and services used |
+| [RUNNING_TESTS.md](RUNNING_TESTS.md) | Step-by-step guide to re-run everything |
